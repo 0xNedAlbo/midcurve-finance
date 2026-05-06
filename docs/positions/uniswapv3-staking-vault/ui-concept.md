@@ -194,7 +194,7 @@ Between the position-management buttons and the archive button, two informationa
 
 The detail page has seven canonical tabs (see [`docs/ui.md` §Tabs](../../ui.md#tabs-common-to-both-types)). Each tab requires a per-protocol decision: applies as-is, reinterpreted, or dropped.
 
-This section is filled in incrementally as the tabs are walked. Two tabs are specified below; the others remain TBD.
+This section is filled in incrementally as the tabs are walked. Three tabs are specified below; the others remain TBD.
 
 ### Tab: Overview
 
@@ -206,7 +206,47 @@ This section is filled in incrementally as the tabs are walked. Two tabs are spe
 
 ### Tab: APR Analysis
 
-*To be specified.*
+**Status: reinterpreted.**
+
+The shared APR-Analysis tab structure is reused, but the Unrealized-APR card is dropped because the vault has no continuous yield-accumulation between settlements. Yield is recognised at disposal events; between disposals the position has zero realised yield, and there is no meaningful live projection of "yield in flight" comparable to NFT `tokensOwed`.
+
+#### APR Breakdown section
+
+Single-card layout (instead of the NFT pattern's two-card Realized/Unrealized split):
+
+- **Total APR** — header line, e.g. `Total APR: 12.4% (over 47.3 days)`. Equals the Realized APR below; no Unrealized component contributes.
+- **Realized APR** card with the breakdown:
+  - Total Yield Collected — `collectedYield` from [position-concept.md §2.1.4](./position-concept.md#21-common-metric-mapping)
+  - Time-Weighted Cost Basis — weighted average of `costBasis` across all completed periods
+  - Active Days — sum of days across all completed periods (see Pause handling below)
+  - `= Realized APR` — `(Total Yield Collected / Time-Weighted Cost Basis) × (365 / Active Days)`
+
+The Unrealized-APR card from the NFT pattern is omitted entirely. The vault's yield mechanic does not support a "yield in flight" estimate: between disposals, no yield is accumulating in any meaningful sense — the yield substance materialises atomically at the `swap()` or `flashClose()` moment.
+
+#### APR Periods section
+
+Chronological list of completed APR periods. Each period spans from one bracket event to the next.
+
+**Bracket events**: `STAKING_DEPOSIT` and `STAKING_DISPOSE` only. Per [position-concept.md §2.1.5](./position-concept.md#21-common-metric-mapping), `STAKING_CLAIM_REWARDS` does not bracket because it is a pure asset/liability movement, not a recognition event — `collectedYield` was already incremented at the prior `STAKING_DISPOSE`.
+
+Per period, the table shows:
+
+- Start event (date, type)
+- End event (date, type)
+- Cost Basis (the average during the period)
+- Yield Collected (= `collectedYield` recognised at the period's end event, if it was a `STAKING_DISPOSE`; otherwise zero)
+- Days
+- APR
+
+If no APR periods exist yet (the position has had no `STAKING_DISPOSE` events), the section displays a hint: _"No completed APR periods yet. Periods are computed at disposal events."_ — analogous to the NFT pattern's empty-state.
+
+#### Pause-phase treatment in APR computation
+
+When the owner pauses the yield-target component (per [§3.1 Slot 5](#slot-5--bottom-action-row), Yield Target Component pause/resume), the position remains staked and capital remains committed, but no settlement can occur. Pause phases **count toward `Active Days`** in the APR computation.
+
+Rationale: APR's definition is `(yield / capital × time)`, and capital is committed throughout the pause. Excluding pause phases would overstate the effective return. If the owner chooses to forgo settlement opportunities, the resulting lower APR should be visible — it reflects an investment decision with consequences.
+
+This treatment is independent of the underlying technical realisation of pause/resume (Phase 4 dependency, see [§3.1 Slot 5](#slot-5--bottom-action-row)).
 
 ### Tab: Conversion → Swap
 
@@ -317,6 +357,11 @@ This section consolidates the requirements that the lower phases (5+ in the renu
 - **`UniswapV3StakingVaultPostJournalEntriesRule`.** New journal-posting rule consuming the five `STAKING_*` domain events and producing single-entry journal entries per the account mapping in [position-concept.md §2.3](./position-concept.md#account-mapping).
 - **`UniswapV3StakingVaultReconcileRule`.** New reconciliation rule checking the two invariants from [position-concept.md §2.3](./position-concept.md#reconciliation): `1010` balance equals `Position.costBasis`, and `1020` balance equals `2000` balance equals booked value of all four buffer slots.
 - **`useUniswapV3StakingVaultPositionAccounting` hook.** Frontend data hook for the Accounting tab.
+
+### Confirmed from §3.2 (APR Analysis)
+
+- **APR period bracketing on STAKING_DEPOSIT and STAKING_DISPOSE only.** The `position_apr_periods` table population logic must skip `STAKING_CLAIM_REWARDS` events when forming periods. Pause phases (yield-target paused) are counted as Active Days regardless of pause-resume mechanism (Phase 4).
+- **APR computation hook.** A `useUniswapV3StakingVaultPositionApr` hook (or extension of an existing APR hook with vault-discriminator support) feeding the single-card APR breakdown plus the periods list.
 
 ### TBD from §3.3 and remaining §3.2 tabs
 
