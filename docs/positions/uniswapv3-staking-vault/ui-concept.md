@@ -76,7 +76,7 @@ uniswapv3-staking-vault • <chain> • <feeTier> • <truncatedVaultAddress> [c
 - **Identifier** — truncated vault address, with copy and explorer-link icons.
 - **Owner badge**: `Bottz-Icon` if `isOwnedByUser == true` (consistent regardless of which user wallet matches; the user is the owner). Truncated owner address in grey if `isOwnedByUser == false` (read-only watching of someone else's vault).
 
-The wrapped NFT's `tokenId` is **not** displayed on the card. It is an implementation detail (per §1.1) and lives in the Technical Details tab of the detail page (§3.2 TBD).
+The wrapped NFT's `tokenId` is **not** displayed on the card. It is an implementation detail (per §1.1) and lives in the Technical Details tab of the detail page (see §3.2).
 
 ### Slot 3 — Metrics block
 
@@ -192,7 +192,109 @@ Between the position-management buttons and the archive button, two informationa
 
 ## 3.2 Detail page tabs
 
-*To be specified.* The detail page's seven canonical tabs (Overview, PnL Analysis, APR Analysis, Conversion, Automation, Accounting, Technical Details) need a per-tab decision: applies as-is, reinterpreted, or dropped. Several tabs interact with Phase 4 (Automation Surface), particularly the Automation tab; this section will be filled in once Phase 3.2 is walked.
+The detail page has seven canonical tabs (see [`docs/ui.md` §Tabs](../../ui.md#tabs-common-to-both-types)). Each tab requires a per-protocol decision: applies as-is, reinterpreted, or dropped.
+
+This section is filled in incrementally as the tabs are walked. Two tabs are specified below; the others remain TBD.
+
+### Tab: Overview
+
+*To be specified.*
+
+### Tab: PnL Analysis
+
+*To be specified.*
+
+### Tab: APR Analysis
+
+*To be specified.*
+
+### Tab: Conversion → Swap
+
+*To be specified.* Tentative direction: the Conversion tab's premise (reconstructing AMM token-amount drift) does not apply to the vault, since token amounts are conserved by construction. The slot will be replaced by a Swap tab presenting the current `swapQuote` and the executor invitation. Final design depends on Phase 4 (Automation Surface).
+
+### Tab: Automation
+
+*To be specified.* Phase 4 dependency.
+
+### Tab: Accounting
+
+**Status: applies as-is, with vault-specific content.**
+
+The shared `PositionAccountingTab` component is reused without changes — it is protocol-agnostic. The vault integration provides:
+
+- A `useUniswapV3StakingVaultPositionAccounting` hook that fetches accounting data from the protocol-specific endpoint.
+- The `UniswapV3StakingVaultPostJournalEntriesRule` (per [position-concept.md §2.3](./position-concept.md#23-pnl-decomposition)) that produces journal entries from the five `STAKING_*` events.
+
+#### Balance Sheet section
+
+Three account classes appear in the vault-specific balance sheet:
+
+**Assets**
+- `1010 Staking Position at Cost` — active UV3 liquidity at acquisition cost.
+- `1020 Position Cash Holdings` — buffered tokens at disposal value.
+
+**Liabilities** (new class for the vault)
+- `2000 Pending Settlement` — obligation to owner for buffered tokens.
+
+**Equity**
+- Standard structure: Contributed Capital, Capital Returned, Retained Earnings (with Realized: Withdrawals, Realized: Yield, Realized: FX Effect as breakdown).
+
+The Pending Settlement liability is the visibility-anchor for buffered amounts: it ensures that a position with `$6,000` total economic value but `$2,000` returned to the owner shows correctly as `$6,000` total assets, `$4,000` pending settlement, `$2,000` net equity returned. Without the liability class, the buffered tokens would either appear as full equity (overstating returned capital) or vanish from the balance sheet (understating total position).
+
+#### P&L Statement section
+
+Four line items, all recognised at disposal time:
+
+- **Realized from Withdrawals** — the `B × ΔP` quantity from `STAKING_DISPOSE`, booked to `4100 Realized Gains` or `5000 Realized Losses`.
+- **Realized from Yield** — yield component from `STAKING_DISPOSE`, booked to `4400 Realized Yield`.
+- **Realized from FX Effect** — quote→USD conversion drift, booked to `4300 FX Gain / Loss`.
+- **Realized from Flash-Loan Fees** — present only if the on-chain pipeline can extract `flashLoanFee` separately (see [position-concept.md §2.3](./position-concept.md#staking_dispose-with-non-zero-flashloanfee)). Otherwise, the fee is implicit in Realized from Withdrawals and the row is omitted.
+
+The drain events (`STAKING_UNSTAKE`, `STAKING_CLAIM_REWARDS`) produce no P&L lines, since they are pure asset/liability movements.
+
+#### Journal Entries section
+
+Standard chronological list of journal entries, one per non-marker event. Each entry shows the date, a descriptive line referencing the event (e.g. `Vault disposal: uniswapv3-staking-vault/<chainId>/<vaultAddress>`), and the debit/credit lines per the account-mapping in [position-concept.md §2.3](./position-concept.md#account-mapping).
+
+`STAKING_CHANGE_CONFIG` events do not appear in the Journal Entries section, only in the Position Ledger (PnL Analysis tab, TBD).
+
+### Tab: Technical Details
+
+**Status: applies as-is.**
+
+The shared `PositionTechnicalDetailsTab` layout is reused: two columns, Vault Configuration (left, immutable) and Vault State (right, mutable). Each field renders as a read-only input with copy and (where applicable) explorer-link icons.
+
+#### Vault Configuration column
+
+Immutable fields from [position-concept.md §2.2](./position-concept.md#22-type-specific-metrics) plus the immutable owner address:
+
+- Vault Address (with explorer link)
+- Factory Address (with explorer link)
+- Wrapped NFT Token ID (with link to the NFT manager view on the explorer)
+- Pool Address (with explorer link)
+- Token0 Address, Token1 Address (with explorer links)
+- Fee Tier
+- Tick Spacing
+- Tick Lower, Tick Upper
+- Is Token0 Quote (Yes / No)
+- Price Range Lower, Price Range Upper (in quote)
+- Owner Address (with explorer link) — set immutably at clone initialisation per SPEC §1; conceptually belongs in Configuration despite being read from `vault.owner()` at runtime
+
+#### Vault State column
+
+Mutable fields from [position-concept.md §2.2](./position-concept.md#22-type-specific-metrics), excluding `swapQuote` (which is presented in the Automation tab where the executor invitation is the meaningful surface):
+
+- `vaultState` (Empty / Staking / Settled)
+- `swapStatus` (NotApplicable / NoSwapNeeded / Executable / Underwater)
+- `stakedBase`, `stakedQuote`
+- `yieldTarget`
+- `pendingBps`, `effectiveBps`
+- `unstakeBufferBase`, `unstakeBufferQuote`
+- `rewardBufferBase`, `rewardBufferQuote`
+- `sqrtPriceX96`, `currentTick`, `poolLiquidity`
+- `wrappedNftLiquidity`
+
+Wrapped-NFT internal accumulators (`feeGrowthInside*X128`, `tokensOwed*`, tick-level fee growth) are deliberately excluded from this tab. They are implementation details of how `currentValue` and `unclaimedYield` are computed and have no power-user value over what the wrapped NFT's explorer view already shows.
 
 ## 3.3 Add-position flow
 
@@ -209,6 +311,13 @@ This section consolidates the requirements that the lower phases (5+ in the renu
 - **Unstake-wizard preview service.** A service that, given a vault position and a `bps` parameter, returns the simulated outcome for both the self-execute path and the flashloan path: resulting swap details, realized PnL, claimable funds delta, flash-loan fee estimate. This is a new service, parallel to the existing `simulate_position_at_price` for NFT positions, but with vault-specific economics.
 - **Yield-target pause/resume mechanic.** Phase 4 dependency; see §3.1 Slot 5. The UI specification is stable; the technical realisation is open.
 
-### TBD from §3.2 and §3.3
+### Confirmed from §3.2 (Accounting & Technical Details)
+
+- **Chart of Accounts extension.** Four new accounts (`1010 Staking Position at Cost`, `1020 Position Cash Holdings`, `2000 Pending Settlement`, `4400 Realized Yield`) plus the new `2xxx` Liability class. Database migration required to extend the `account_definitions` table with the new entries. Final account codes are subject to alignment with existing conventions; the codes proposed here are suggestions.
+- **`UniswapV3StakingVaultPostJournalEntriesRule`.** New journal-posting rule consuming the five `STAKING_*` domain events and producing single-entry journal entries per the account mapping in [position-concept.md §2.3](./position-concept.md#account-mapping).
+- **`UniswapV3StakingVaultReconcileRule`.** New reconciliation rule checking the two invariants from [position-concept.md §2.3](./position-concept.md#reconciliation): `1010` balance equals `Position.costBasis`, and `1020` balance equals `2000` balance equals booked value of all four buffer slots.
+- **`useUniswapV3StakingVaultPositionAccounting` hook.** Frontend data hook for the Accounting tab.
+
+### TBD from §3.3 and remaining §3.2 tabs
 
 To be filled in.

@@ -348,10 +348,10 @@ costBasis`, not a stored cumulative.
 | `realizedCashflow` | n/a — no periodic income stream in the vault model | — | `0` | constant |
 | `unrealizedPnl` | Standard derived value `currentValue − costBasis` | Computed | Quote bigint | Live (derived) |
 | `unrealizedCashflow` | n/a | — | `0` | constant |
-| `collectedYield` | Cumulative quote value of yield drained to owner; recognised at drain time, valued at `P_drain` | Ledger-cumulative; written only on `STAKING_CLAIM_REWARDS` | Quote bigint | Ledger-derived |
+| `collectedYield` | Cumulative quote value of yield recognised at the disposal that filled the reward buffer; valued at `P_settle` | Ledger-cumulative; written on `STAKING_DISPOSE` (the reward-fill component) | Quote bigint | Ledger-derived |
 | `unclaimedYield` | Quote-valued contents of the reward buffer (UV3 fees + LVR substance + allocated `T` share) | `vault.rewardBufferBase × P_pool + vault.rewardBufferQuote` | Quote bigint | Live |
 | `lastYieldClaimedAt` | Timestamp of the most recent `STAKING_CLAIM_REWARDS` event | Ledger | Date | Ledger-derived |
-| `baseApr` | Time-weighted APR computed from `collectedYield` over weighted average `costBasis`, bracketed on `STAKING_DEPOSIT` / `STAKING_DISPOSE` / `STAKING_CLAIM_REWARDS` events | `PositionAprPeriod` aggregation | Float, basis-point precision | Aggregated from ledger periods |
+| `baseApr` | Time-weighted APR computed from `collectedYield` over weighted average `costBasis`, bracketed on `STAKING_DEPOSIT` and `STAKING_DISPOSE` events | `PositionAprPeriod` aggregation | Float, basis-point precision | Aggregated from ledger periods |
 | `rewardApr` | n/a — no external incentive programmes | — | `null` | constant |
 | `totalApr` | `baseApr` (or `null`) | Computed | Float \| null | Aggregated |
 | `positionOpenedAt` | Timestamp of the first `STAKING_DEPOSIT` event | Ledger | Date | Ledger-derived |
@@ -366,17 +366,23 @@ costBasis`, not a stored cumulative.
   is always well-defined and symmetric with NFT valuation, which
   matters for portfolio-level aggregates.
 
-- **`collectedYield` recognises at drain time, not at disposal time.**
-  This is asymmetric with `realizedPnl` (which recognises at disposal):
-  `realizedPnl` is a disposal quantity (it measures the position's own
-  unwind), while `collectedYield` is a cashflow quantity (it measures
-  what the owner actually received in quote terms). This follows
-  [philosophy.md §Cash Flow Measurement] directly. The asymmetry has a
-  practical consequence: any FX drift on the base component of the
-  reward buffer between disposal and drain flows into `collectedYield`
-  rather than being booked separately. For owners who drain promptly
-  (or for `flashClose` with auto-drain in the same transaction), the
-  drift is zero.
+- **`collectedYield` recognises at disposal time, symmetric with
+  `realizedPnl`.** Both are recognised at the same event
+  (`STAKING_DISPOSE`) because both reflect the realisation of position
+  economics — `realizedPnl` for the principal component, `collectedYield`
+  for the yield component. The drain events (`STAKING_UNSTAKE`,
+  `STAKING_CLAIM_REWARDS`) are pure asset/liability movements within
+  the position's accounting; they have no recognition impact.
+
+  The mark-to-market value of buffered tokens between disposal and
+  drain is reflected only in `unrealizedPnl` (live valuation of the
+  buffer at pool price vs. its booked value at disposal). It does not
+  produce a separate realised PnL component; the buffered tokens are
+  held at-cost from the disposal moment until they leave the vault.
+  Any FX drift on the base component between disposal and drain is
+  visible to the user via the `unrealizedPnl` movement, then folds
+  into the next disposal's `Realized Gains` / `Realized Losses` if
+  not yet drained.
 
 - **`priceRangeLower/Upper` is the wrapped-NFT range, not the
   swap-executable band.** The NFT range is the region where the
@@ -465,14 +471,14 @@ accounting) or `flashClose()`. One event per disposal.
 |---|---|
 | `deltaCostBasis` | `−(costBasisBefore × bps / 10000)` |
 | `deltaPnl` | `principalPayoutValue − proportionalCostBasis − flashLoanFee` |
-| `deltaCollectedYield` | `0` (recognition at drain) |
+| `deltaCollectedYield` | `+rewardFillValue` (recognition at disposal) |
 | `deltaRealizedCashflow` | `0` |
 | `deltaLiquidity` | `−removedLiquidity` |
 | `tokenValue` | `0` (no movement to owner; tokens move into the buffers) |
 | `rewards` | `[]` |
 | `config` | `{ bps, disposalKind: 'swap' \| 'flashClose', executor, principalPayoutBase, principalPayoutQuote, rewardFillBase, rewardFillQuote, sqrtPriceX96, flashLoanFee }` |
 
-`principalPayoutValue = principalPayoutBase × P_settle + principalPayoutQuote`. `flashLoanFee == 0` unless `disposalKind == 'flashClose'`. The `executor` field captures the `msg.sender` of the underlying call, which lets the UI distinguish self-executed from third-party-executed disposals; on `flashClose` it is always the owner.
+`principalPayoutValue = principalPayoutBase × P_settle + principalPayoutQuote`. `rewardFillValue = rewardFillBase × P_settle + rewardFillQuote`. `flashLoanFee == 0` unless `disposalKind == 'flashClose'`. The `executor` field captures the `msg.sender` of the underlying call, which lets the UI distinguish self-executed from third-party-executed disposals; on `flashClose` it is always the owner.
 
 #### `STAKING_UNSTAKE`
 
@@ -496,19 +502,22 @@ reconciliation.
 
 #### `STAKING_CLAIM_REWARDS`
 
-Drain of `rewardBuffer*` to the owner. The single event that writes
-`deltaCollectedYield`, per the drain-time recognition rule from 2.1.
+Drain of `rewardBuffer*` to the owner.
 
 | Field | Value |
 |---|---|
 | `deltaCostBasis` | `0` |
 | `deltaPnl` | `0` |
-| `deltaCollectedYield` | `+(drainedBase × P_drain + drainedQuote)` |
+| `deltaCollectedYield` | `0` (already recognised at the prior `STAKING_DISPOSE`) |
 | `deltaRealizedCashflow` | `0` |
 | `deltaLiquidity` | `0` |
-| `tokenValue` | equals `deltaCollectedYield` |
+| `tokenValue` | `+(drainedBase × P_drain + drainedQuote)` |
 | `rewards` | `[]` |
 | `config` | `{ drainedBase, drainedQuote, sqrtPriceX96 }` |
+
+Marker only — `collectedYield` was incremented at the `STAKING_DISPOSE`
+that filled the reward buffer. `tokenValue` records the actual
+movement to the owner.
 
 `rewards: []` is intentional. The `rewards` array is for external
 reward-token programmes; the vault's intrinsic yield is in token0/
@@ -537,74 +546,139 @@ it is purely a marker.
 ### Account mapping
 
 The journal-posting rule (`UniswapV3StakingVaultPostJournalEntriesRule`)
-maps each non-marker event to journal lines. The chart of accounts
-reuses the existing slots — `Position`, `Cash`, `Yield`, `PnL` — and
-introduces one new account: `Suspense`, representing buffer contents
-that economically belong to the owner but physically still sit inside
-the vault.
+maps each non-marker event to a single journal entry containing all
+required lines. The chart of accounts adds four new accounts to the
+existing schema:
+
+| Code | Account | Class | Normal side | Purpose |
+|---|---|---|---|---|
+| 1010 | Staking Position at Cost | Asset | Debit | Active UV3 liquidity, at acquisition cost |
+| 1020 | Position Cash Holdings | Asset | Debit | Buffered tokens (unstake + reward), at disposal value |
+| 2000 | Pending Settlement | Liability | Credit | Obligation to owner for buffered tokens, at disposal value |
+| 4400 | Realized Yield | Revenue | Credit | Yield recognised at disposal |
+
+Existing accounts in use: `3000 Contributed Capital`, `3100 Capital Returned`, `4100 Realized Gains`, `4300 FX Gain / Loss`, `5000 Realized Losses`.
+
+The `2xxx` Liability class is new in the chart of accounts. Account
+codes are suggestions; final assignment is the implementation phase's
+responsibility (must align with existing conventions in
+`account_definitions`).
 
 #### `STAKING_DEPOSIT` (value `V`)
 
 ```
-Debit  Position[vaultAddress]   V
-Credit Cash[ownerWallet]        V
+DR 1010 Staking Position at Cost   V
+CR 3000 Contributed Capital        V
 ```
+
+Identical to the existing NFT/Vault-Share acquisition pattern.
 
 #### `STAKING_DISPOSE` (profitable)
 
 ```
-Debit  Suspense[vaultAddress]   principalPayoutValue
-Credit Position[vaultAddress]   proportionalCostBasis
-Credit PnL[ownerWallet]         realizedPnl
+DR 3100 Capital Returned          principalPayout + rewardFill
+DR 1020 Position Cash Holdings    principalPayout + rewardFill
+CR 1010 Staking Position at Cost  proportionalCostBasis
+CR 4100 Realized Gains            principalPayout − proportionalCostBasis
+CR 4400 Realized Yield            rewardFill
+CR 2000 Pending Settlement        principalPayout + rewardFill
 ```
+
+A single journal entry combining two effects. The first set of lines
+(Capital Returned, Staking Position at Cost reduction, Realized Gains,
+Realized Yield) follows the existing NFT/Vault-Share disposal pattern:
+equity is reclassified from active capital to returned capital, the
+cost basis is removed, gains and yield are recognised. The other two
+lines (Position Cash Holdings, Pending Settlement) record the buffer
+creation: tokens enter the vault's cash holdings as an asset, balanced
+by a liability to the owner.
+
+Balance check: DR `2 × (principalPayout + rewardFill)` equals CR
+`proportionalCostBasis + (principalPayout − proportionalCostBasis) +
+rewardFill + (principalPayout + rewardFill) = 2 × (principalPayout +
+rewardFill)`. ✓
 
 #### `STAKING_DISPOSE` (loss-making)
 
 ```
-Debit  Suspense[vaultAddress]   principalPayoutValue
-Debit  PnL[ownerWallet]         |realizedPnl|
-Credit Position[vaultAddress]   proportionalCostBasis
+DR 3100 Capital Returned          principalPayout + rewardFill
+DR 1020 Position Cash Holdings    principalPayout + rewardFill
+DR 5000 Realized Losses           |principalPayout − proportionalCostBasis|
+CR 1010 Staking Position at Cost  proportionalCostBasis
+CR 4400 Realized Yield            rewardFill
+CR 2000 Pending Settlement        principalPayout + rewardFill
 ```
 
-For `flashClose` with non-zero flash-loan fee, append:
+Identical structure to the profitable variant, with `Realized Losses`
+on the debit side instead of `Realized Gains` on the credit side.
+
+#### `STAKING_DISPOSE` with non-zero `flashLoanFee`
+
+If the on-chain pipeline can extract `flashLoanFee` separately (a
+Phase 5 question — on-chain events do not directly emit this value;
+the pipeline would need to parse provider-specific events from
+Aave/Balancer/Morpho or compute the fee via token-difference on the
+flash-loan helper contract), an additional pair of lines is appended:
 
 ```
-Debit  PnL[ownerWallet]         flashLoanFee
-Credit Cash[ownerWallet]        flashLoanFee
+DR 5000 Realized Losses           flashLoanFee
+CR 3100 Capital Returned          flashLoanFee
 ```
 
-#### `STAKING_UNSTAKE` (value `V`)
+If extraction is not feasible, the fee is implicit in a smaller
+`principalPayout` and subsumed in `Realized Gains` / `Realized Losses`.
+This is a pipeline-availability decision, not a concept-level
+decision; the journal-posting rule will conditionally include or omit
+these lines based on whether `config.flashLoanFee > 0`.
+
+#### `STAKING_UNSTAKE` (drained value `V`)
 
 ```
-Debit  Cash[ownerWallet]        V
-Credit Suspense[vaultAddress]   V
+DR 2000 Pending Settlement        V
+CR 1020 Position Cash Holdings    V
 ```
 
-The Suspense account drains to zero per disposal once the owner
-unstakes. If `Suspense[vaultAddress]` carries an open balance, it
-indicates an undrained `unstakeBuffer*` — visible in reconciliation
-and in any "pending balance" UI.
+Pure asset/liability movement. The drained value `V` equals the value
+originally booked into Pending Settlement at the disposal — no
+revaluation occurs at drain time. Any FX drift on the base component
+between disposal and drain is visible only via the position's
+`unrealizedPnl` (the live mark-to-market of the buffer at pool price
+vs. its booked value at disposal). It does not produce a separate
+realised PnL line at drain; if not yet drained, the drift folds into
+the next disposal's `Realized Gains` / `Realized Losses`.
 
-#### `STAKING_CLAIM_REWARDS` (value `V`)
+#### `STAKING_CLAIM_REWARDS` (drained value `V`)
 
 ```
-Debit  Cash[ownerWallet]        V
-Credit Yield[ownerWallet]       V
+DR 2000 Pending Settlement        V
+CR 1020 Position Cash Holdings    V
 ```
 
-Direct path with no Suspense intermediate, because yield recognition
-happens at drain (per 2.1) — there is no period of "yield owed but
-not yet recognised". This mirrors the NFT `COLLECT` event exactly.
+Identical mechanism to `STAKING_UNSTAKE`, just for the reward-buffer
+slice of `Pending Settlement`. Yield was already recognised as
+`Realized Yield` at the prior `STAKING_DISPOSE`; the drain is a pure
+asset/liability movement.
+
+#### `STAKING_CHANGE_CONFIG`
+
+No journal entry. Marker only.
 
 ### Reconciliation
 
-`UniswapV3StakingVaultReconcileCostBasisRule` periodically checks:
+`UniswapV3StakingVaultReconcileRule` periodically checks two
+invariants:
 
-- `Position[vaultAddress]` balance equals `Position.costBasis` (the
-  primary cost-basis invariant).
-- `Suspense[vaultAddress]` balance equals
-  `unstakeBufferBase × P_pool + unstakeBufferQuote` at the refresh
-  block (the buffer-tracking invariant).
+- **Cost-basis invariant.** `1010 Staking Position at Cost` balance
+  equals `Position.costBasis`. The primary check that
+  deposit/disposal cost-basis movements are consistent.
+- **Buffer-tracking invariant.** `1020 Position Cash Holdings` balance
+  equals `2000 Pending Settlement` balance, both equal to the booked
+  value of all four buffer slots (`unstakeBufferBase × P_settle +
+  unstakeBufferQuote + rewardBufferBase × P_settle + rewardBufferQuote`,
+  where `P_settle` is the pool price at the disposal that filled each
+  buffer component). Note: this is the *booked* value, not the
+  current pool-price-marked value, since neither account is revalued
+  at drain.
 
 A mismatch on either signals a missed event or a misposted event.
 
