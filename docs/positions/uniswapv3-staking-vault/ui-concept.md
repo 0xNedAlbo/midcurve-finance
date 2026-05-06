@@ -58,8 +58,8 @@ The upper badge row, rendered alongside the pair name. Vault-card badges:
 Badges deliberately **not** included:
 
 - `Burned` — the wrapped NFT may technically be burned after settlement and full drain, but this is irrelevant to the vault user. The vault clone's address is permanent (per SPEC §1) and is the user's reference, not the NFT.
-- `Underwater` — the underwater state is an internal vault condition that surfaces in the swap-status field; it does not warrant a card-level badge. Users see the consequence (in the unstake-wizard preview) where it matters operationally.
-- `Pending Partial` — the partial-unstake-pending state (`pendingBps > 0`) is a configuration detail surfaced in the detail page (§3.2 TBD), not on the card.
+- `Underwater` — the underwater state is an internal vault condition that surfaces in the Overview tab's Position State block via the `swapStatus` indicator (see §3.2, Overview tab); it does not warrant a card-level badge.
+- `Pending Partial` — the partial-unstake-pending state (`pendingBps > 0`) is surfaced in the Overview tab's Position State block (see §3.2), not on the card.
 - `Empty` — the empty state (`vaultState == 'Empty'`) is implicit in the metrics block (`Current Value: 0`) and the action row state.
 
 ### Slot 2 — Header structural line
@@ -194,11 +194,60 @@ Between the position-management buttons and the archive button, two informationa
 
 The detail page has seven canonical tabs (see [`docs/ui.md` §Tabs](../../ui.md#tabs-common-to-both-types)). Each tab requires a per-protocol decision: applies as-is, reinterpreted, or dropped.
 
-This section is filled in incrementally as the tabs are walked. Four tabs are specified below; the others remain TBD.
+This section is filled in incrementally as the tabs are walked. Five tabs are specified below; the two remaining (Conversion → Swap, Automation) are Phase 4 dependent.
 
 ### Tab: Overview
 
-*To be specified.*
+**Status: applies as-is, with a vault-specific Position State block.**
+
+The Overview tab follows the existing pattern: a hero summary at the top, the price-range visualisation as the centrepiece, and supporting blocks below. The vault-specific addition is the Position State block, which surfaces operational status that has no NFT analog.
+
+#### Hero Summary section
+
+A compact top row with the four headline metrics, presented at larger size than on the card:
+
+- **Current Value** — `currentValue` in quote, prominent
+- **Total PnL** — `realizedPnl + unrealizedPnl + collectedYield + unclaimedYield`, with arrow and red/green tinting
+- **Cost Basis** — `costBasis` in quote
+- **Yield Target** — `state.yieldTarget` (or `Not set` if `uint256.max`)
+
+These are the same metrics as the card's Slot 3 block, recomposed for the larger detail-page surface.
+
+#### Range Visualisation section
+
+The shared range-visualisation component is reused as-is. Shows:
+
+- The wrapped NFT's `[priceRangeLower, priceRangeUpper]` band
+- The current pool price as a marker
+- In-Range / Out-of-Range status, colour-coded consistently with the Slot 1 badge
+
+No vault-specific adaptations. The range is displayed because the wrapped NFT does have a real range, even though the user's settlement is gated by yield-target satisfaction rather than range-crossings.
+
+#### Position State block (vault-specific)
+
+A four-indicator grid surfacing the operational state. Each indicator with concise styling:
+
+| Indicator | Possible values |
+|---|---|
+| **Vault State** | `Empty` / `Staking` / `Settled` (neutral colour) |
+| **Swap Status** | `NotApplicable` / `NoSwapNeeded` / `Executable` (green) / `Underwater` (red) |
+| **Yield Target** | `Not set` / `<value> USDC active` / `<value> USDC paused` (single-row presentation combining value and pause state) |
+| **Pending Unstake** | `None` / `<X>% pending` |
+
+The Underwater condition surfaces here as one of the four Swap Status values, in red. No separate warning box and no card-level badge — the red Swap Status indicator carries the information without overdramatising. Underwater is a user-caused condition (the user set `T`), not a system emergency.
+
+#### Buffer Holdings section
+
+The per-buffer breakdown that the card combines into a single Claimable Funds value:
+
+| | Base | Quote | Total Value |
+|---|---|---|---|
+| Unstake Buffer | `<base>` | `<quote>` | `$<value>` |
+| Reward Buffer | `<base>` | `<quote>` | `$<value>` |
+
+Below the table, a **Claim Funds** quick-action button that opens the same modal as the card's `$ Claim Funds` action (see [§3.1 Slot 5](#slot-5--bottom-action-row)). This is convenience for the user already in the detail page; the button is duplicated by design — card buttons serve the list context, detail-page buttons serve the detail context.
+
+The button follows the same multi-wallet handling as on the card: visible if `isOwnedByUser`, opens `SwitchConnectedWalletPrompt` if `isConnectedWalletOwner == false`.
 
 ### Tab: PnL Analysis
 
@@ -415,6 +464,10 @@ This section consolidates the requirements that the lower phases (5+ in the renu
 
 - **Position Ledger query for the vault** must return all five `STAKING_*` event types, including PnL-neutral events (`STAKING_UNSTAKE`, `STAKING_CLAIM_REWARDS`, `STAKING_CHANGE_CONFIG`). The `useUniswapV3StakingVaultPositionEvents` hook (or equivalent) feeds the Position Ledger table; the `STAKING_CHANGE_CONFIG` events are sourced from the ledger like any other event despite producing no journal entry.
 - **PnL Breakdown computation hook.** A `useUniswapV3StakingVaultPositionPnL` hook (or extension of an existing PnL hook with vault-discriminator support) feeding the two-card Realized/Unrealized breakdown.
+
+### Confirmed from §3.2 (Overview)
+
+- **Overview composition.** No new endpoints; the Overview tab composes from data already exposed for §3.1 (card metrics, vault state) and shares the range-visualisation component with the NFT pattern. A thin `useUniswapV3StakingVaultPositionOverview` aggregation hook is recommended for the page-level data fetch but is largely a composition over existing hooks.
 
 ### TBD from §3.3 and remaining §3.2 tabs
 
