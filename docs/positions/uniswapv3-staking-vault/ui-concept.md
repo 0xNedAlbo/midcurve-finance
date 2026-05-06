@@ -435,11 +435,90 @@ Wrapped-NFT internal accumulators (`feeGrowthInside*X128`, `tokensOwed*`, tick-l
 
 ## 3.3 Add-position flow
 
-*To be specified.* The four canonical entry points (Create Wizard, Import by ID, Import by Address, Scan Wallet) need a per-entry decision. Notable in advance: the Create Wizard for the staking vault requires steps that have no NFT analog (yield target selection, atomic factory-deploy + initial-stake transaction); Scan Wallet relies on the factory's `VaultCreated` event indexing.
+The Add Position dropdown (per [`docs/ui.md`](../../ui.md)) currently exposes four entry points: Create New Position, Import NFT by ID, Import Tokenized Position by Address, and Scan Wallet. This iteration specifies only the **Create New Position wizard** for the staking vault. The other three entry points are deferred to a separate iteration.
+
+### Approach: extend the existing Create Wizard, do not build a parallel one
+
+The existing four-step Create Wizard (Step 1: Select Pool → Step 2: Capital Allocation / Position Range / SL-TP Setup → Step 3: Acquire Required Tokens → Step 4: Execute Transactions) is reused as-is for the staking vault, with minimal targeted extensions.
+
+Rationale: the wizard's overall structure is shared by both position types — pool selection, base/quote/chain selection, capital allocation, and range selection are identical operations. Only the final transaction list differs materially. Building a parallel wizard would duplicate the majority of the surface for marginal gain. A future refactor of the Add Position flow may consolidate position-type handling more comprehensively as more position types are added; this iteration is deliberately pragmatic.
+
+### Step 1 — Select Pool: extension
+
+A new **Position Type** section is added to the Summary panel on the right, between `Selected Pool` and `Allocated Capital`:
+
+```
+Position Type
+[ Standard UniswapV3 ▾ ]
+   Standard UniswapV3
+   Uniswap V3 Staking Vault
+```
+
+Default: `Standard UniswapV3` (preserves existing behaviour). The selection is persisted across all subsequent wizard steps via the wizard's existing query-string state mechanism.
+
+Pool selection, base/quote token selection, and chain selection are unchanged — both position types operate on the same Uniswap V3 pool set.
+
+### Step 2 — Capital Allocation / Position Range / SL-TP Setup: per-tab treatment
+
+The three-tab structure of step 2 is preserved for visual consistency.
+
+**Capital Allocation tab** — identical for both position types. The wizard collects `(B, Q)` token amounts; for the staking vault these become the `(B, Q)` of the initial stake passed to `factory.createVault(...)`.
+
+**Position Range tab** — identical for both position types. The selected `[lowerTick, upperTick]` becomes the wrapped NFT's range, set immutably at vault creation.
+
+**SL/TP Setup tab** — when `Position Type == Staking Vault`, the tab is visible but inactive. It displays an info panel:
+
+> _**Stop-loss and take-profit are not applicable to staking vaults.** The vault's settlement is governed by a yield target instead, set in quote-token units. The yield target defaults to `uint256.max` (Not set) at creation, leaving the vault in the strong-guarantee state where principal recovery is structurally always honourable (per [position-concept.md §1.3](./position-concept.md#13-economic-invariant), Strong guarantee at T=0). It can be configured after creation via the position card's Yield Target Component (per [§3.1 Slot 5](#slot-5--bottom-action-row))._
+
+No yield-target input is collected in the wizard. The yield target is **only** configurable post-creation via the card's Yield Target Component. Rationale: keeping the wizard's `createVault()` call as a single atomic transaction (deploy + initial stake) without forcing the user to commit to a target before they've seen the position in their portfolio. The vault is fully usable in the `uint256.max` / Strong-guarantee state; the user is not blocked.
+
+The Summary panel's `Risk Profile` section adapts when `Position Type == Staking Vault`: the Stop Loss / Take Profit / Max Drawdown / Max Runup lines are replaced by a single line:
+
+```
+Yield Target    Not set
+                (configure after creation)
+```
+
+This is informational — no interaction.
+
+### Step 3 — Acquire Required Tokens: identical
+
+The wallet-balance check is token-and-amount based, which is independent of how the tokens will be consumed downstream. No change.
+
+### Step 4 — Execute Transactions: position-type-specific transaction list
+
+The transaction list differs based on `Position Type`:
+
+| Step | Standard UniswapV3 (existing) | Staking Vault (new) |
+|---|---|---|
+| 1 | Approve token0 → NPM | Approve token0 → Factory |
+| 2 | Approve token1 → NPM | Approve token1 → Factory |
+| 3 | Pool price drift check | Pool price drift check (identical) |
+| 4 | **Open** UniswapV3 Position (`NPM.mint(...)`) | **Create** Staking Vault (`factory.createVault(...)`) |
+
+The pool price drift check is a generic sanity pattern and runs identically for both position types.
+
+For the staking vault, the final transaction calls `factory.createVault(...)` which atomically deploys the EIP-1167 clone, initialises ownership (immutably setting `vault.owner()` to the connected wallet per SPEC §1), and performs the initial stake — closing the standard EIP-1167 front-running race per [position-concept.md §1.1](./position-concept.md#11-identity).
+
+The button label changes from `Open UniswapV3 Position` to `Create Staking Vault` accordingly. Approval targets change from NPM to Factory, but this is implementation detail not surfaced to the user beyond the transaction count being identical.
+
+The Summary panel's `Selected Pool` block remains identical; only the Risk Profile section reflects the position-type difference (configured in Step 2).
+
+### Post-creation handoff
+
+After successful execution of the final transaction, the wizard navigates to the position list. For a staking vault, the new card appears with `Yield Target: Not set` in Slot 5 of the bottom action row (per [§3.1 Slot 5](#slot-5--bottom-action-row)). The user can either leave the vault in the strong-guarantee state (the default) or click `+ Yield Target` on the card to enter the conditional-guarantee state with an explicit target.
+
+### What is deliberately not in the wizard
+
+- **Yield target input.** Out of scope for this iteration; configured post-creation only via the card's Yield Target Component. The default `uint256.max` is a fully functional state, not a placeholder.
+- **Partial-unstake-bps configuration.** Defaults to `0` (no pending partial); the user does not need to think about this at creation.
+- **Approval-target distinction in the UI.** The user does not see whether the approval target is the NPM or the Factory.
+- **Vault address preview.** Counterfactual (CREATE2-based) address computation could let the wizard show the upcoming vault address before creation. Out of scope; the address appears in the position card after the transaction confirms.
+- **Other entry points.** Import NFT by ID, Import Tokenized Position by Address, and Scan Wallet are deferred. The Import Tokenized entry point is a natural future extension for vault-by-address import; Scan Wallet would require indexing of the factory's `VaultCreated` events.
 
 ## 3.4 Backend requirements derived
 
-This section consolidates the requirements that the lower phases (5+ in the renumbered guide) will need to fulfil. It will be expanded as §3.2 and §3.3 are walked.
+This section consolidates the requirements that the lower phases (5+ in the renumbered guide) will need to fulfil.
 
 ### Confirmed from §3.1
 
@@ -469,6 +548,15 @@ This section consolidates the requirements that the lower phases (5+ in the renu
 
 - **Overview composition.** No new endpoints; the Overview tab composes from data already exposed for §3.1 (card metrics, vault state) and shares the range-visualisation component with the NFT pattern. A thin `useUniswapV3StakingVaultPositionOverview` aggregation hook is recommended for the page-level data fetch but is largely a composition over existing hooks.
 
-### TBD from §3.3 and remaining §3.2 tabs
+### Confirmed from §3.3 (Create Wizard extension)
 
-To be filled in.
+- **Wizard state extension.** A `positionType: 'standard' | 'staking_vault'` field added to the Create Wizard's query-string state and React state machine. Default `'standard'`. Persisted across all four wizard steps.
+- **Step 1 Position Type dropdown.** New Summary-panel section between `Selected Pool` and `Allocated Capital`, two options.
+- **Step 2 SL/TP tab inactivation.** When `positionType == 'staking_vault'`, the SL/TP Setup tab renders an info panel instead of the input fields. The Summary panel's Risk Profile section replaces the SL/TP lines with a single Yield Target informational line.
+- **Step 4 transaction-list resolver.** Produces the position-type-specific transaction list including approval targets (NPM for standard, Factory for staking vault) and the final mint vs. createVault call. Button label is parametrised on position type.
+- **Factory ABI integration.** `factory.createVault(pool, tickLower, tickUpper, baseAmount, quoteAmount, owner)` call construction, with `owner = connectedWallet.address`. Yield target is **not** a parameter — vault is initialised with `yieldTarget = uint256.max`.
+
+### TBD
+
+- Other Add-position entry points (Import NFT by ID, Import Tokenized by Address, Scan Wallet) — separate iteration.
+- The two Phase-4-dependent tabs in §3.2 (Conversion → Swap, Automation).
