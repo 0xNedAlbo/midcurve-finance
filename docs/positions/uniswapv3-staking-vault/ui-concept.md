@@ -194,7 +194,7 @@ Between the position-management buttons and the archive button, two informationa
 
 The detail page has seven canonical tabs (see [`docs/ui.md` §Tabs](../../ui.md#tabs-common-to-both-types)). Each tab requires a per-protocol decision: applies as-is, reinterpreted, or dropped.
 
-This section is filled in incrementally as the tabs are walked. Three tabs are specified below; the others remain TBD.
+This section is filled in incrementally as the tabs are walked. Four tabs are specified below; the others remain TBD.
 
 ### Tab: Overview
 
@@ -202,7 +202,55 @@ This section is filled in incrementally as the tabs are walked. Three tabs are s
 
 ### Tab: PnL Analysis
 
-*To be specified.*
+**Status: reinterpreted, with the Position Ledger acting as the full audit trail of position events.**
+
+The shared PnL-Analysis tab structure is reused: a PnL Breakdown section followed by the Position Ledger.
+
+#### PnL Breakdown section
+
+Two-card layout (consistent with NFT/Vault-Share pattern):
+
+**Realized PnL** card (recognised, lifetime-to-date):
+- Realized from Withdrawals — `B × ΔP` component cumulated from `STAKING_DISPOSE` events
+- Realized from Yield — `collectedYield` cumulated from `STAKING_DISPOSE` events
+- Realized from FX Effect — quote→USD conversion drift
+- Realized from Flash-Loan Fees — only if pipeline can extract `flashLoanFee` (see Phase 5 dependency)
+- = Subtotal
+
+All four lines map directly to accounting accounts (see Accounting tab and [position-concept.md §2.3](./position-concept.md#account-mapping)). The Realized PnL card includes all yield that has been recognised at the disposal — even if the corresponding tokens still sit in the reward buffer waiting to be drained. This is consistent with the disposal-time recognition rule from [position-concept.md §2.1.4](./position-concept.md#21-common-metric-mapping).
+
+**Unrealized PnL** card (live mark-to-market):
+- Current Position Value — `currentValue`
+- Cost Basis — `costBasis`
+- = Subtotal: `currentValue − costBasis` = `unrealizedPnl`
+
+Unlike the NFT pattern, the Unrealized card does not have a separate "Unclaimed Fees" line. The vault has no continuous fee accumulation; what the NFT pattern would call "unclaimed" is in the vault either already-recognised (in the reward buffer post-disposal) or not yet existing (no disposal has occurred). Buffer-tokens at-cost are baked into both `currentValue` (mark-to-market) and the Pending Settlement liability that offsets them.
+
+#### Position Ledger section
+
+The Position Ledger is the chronological audit trail of all events affecting the position, including PnL-neutral events. Five event types appear:
+
+- **`STAKING_DEPOSIT`** — initial stake or top-up; affects cost basis
+- **`STAKING_DISPOSE`** — settlement (swap or flashClose); recognises PnL and yield
+- **`STAKING_UNSTAKE`** — drain of unstake-buffer; PnL-neutral
+- **`STAKING_CLAIM_REWARDS`** — drain of reward-buffer; PnL-neutral
+- **`STAKING_CHANGE_CONFIG`** — owner-intent change (yield target, partial-unstake bps); PnL-neutral
+
+All events render with identical visual treatment, consistent with the existing NFT/Vault-Share Position Ledger. PnL-neutral events display `0` or `—` in the Realized PnL column; the chronological context makes their role clear.
+
+Table columns: **Date & Time**, **Event Type**, **Value**, **Realized PnL**, **Details**, **Transaction**.
+
+**Details column content** per event type:
+
+| Event Type | Details column |
+|---|---|
+| `STAKING_DEPOSIT` | `+<base> + <quote> staked` (token amounts consumed) |
+| `STAKING_DISPOSE` | `bps: <X>, principal: $<Y>, yield: $<Z>` (settlement summary, optional flash-loan fee if extractable) |
+| `STAKING_UNSTAKE` | `<base> + <quote> drained` (token amounts) |
+| `STAKING_CLAIM_REWARDS` | `<base> + <quote> drained` (token amounts) |
+| `STAKING_CHANGE_CONFIG` | `<param>: <oldValue> → <newValue>` (e.g. `yieldTarget: 400 USDC → 600 USDC`) |
+
+The Transaction column links to the on-chain explorer for the transaction hash, identical to the NFT pattern.
 
 ### Tab: APR Analysis
 
@@ -296,7 +344,7 @@ The drain events (`STAKING_UNSTAKE`, `STAKING_CLAIM_REWARDS`) produce no P&L lin
 
 Standard chronological list of journal entries, one per non-marker event. Each entry shows the date, a descriptive line referencing the event (e.g. `Vault disposal: uniswapv3-staking-vault/<chainId>/<vaultAddress>`), and the debit/credit lines per the account-mapping in [position-concept.md §2.3](./position-concept.md#account-mapping).
 
-`STAKING_CHANGE_CONFIG` events do not appear in the Journal Entries section, only in the Position Ledger (PnL Analysis tab, TBD).
+`STAKING_CHANGE_CONFIG` events do not appear in the Journal Entries section, only in the Position Ledger (PnL Analysis tab).
 
 ### Tab: Technical Details
 
@@ -362,6 +410,11 @@ This section consolidates the requirements that the lower phases (5+ in the renu
 
 - **APR period bracketing on STAKING_DEPOSIT and STAKING_DISPOSE only.** The `position_apr_periods` table population logic must skip `STAKING_CLAIM_REWARDS` events when forming periods. Pause phases (yield-target paused) are counted as Active Days regardless of pause-resume mechanism (Phase 4).
 - **APR computation hook.** A `useUniswapV3StakingVaultPositionApr` hook (or extension of an existing APR hook with vault-discriminator support) feeding the single-card APR breakdown plus the periods list.
+
+### Confirmed from §3.2 (PnL Analysis)
+
+- **Position Ledger query for the vault** must return all five `STAKING_*` event types, including PnL-neutral events (`STAKING_UNSTAKE`, `STAKING_CLAIM_REWARDS`, `STAKING_CHANGE_CONFIG`). The `useUniswapV3StakingVaultPositionEvents` hook (or equivalent) feeds the Position Ledger table; the `STAKING_CHANGE_CONFIG` events are sourced from the ledger like any other event despite producing no journal entry.
+- **PnL Breakdown computation hook.** A `useUniswapV3StakingVaultPositionPnL` hook (or extension of an existing PnL hook with vault-discriminator support) feeding the two-card Realized/Unrealized breakdown.
 
 ### TBD from §3.3 and remaining §3.2 tabs
 
