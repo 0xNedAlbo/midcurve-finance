@@ -28,8 +28,10 @@ any successful settlement, the owner can recover at least `(B, Q + T)`.
 Subclasses extend the base with permissionless settlement strategies:
 - `ManualStakingVault` — no automation, owner is the sole settlement
   actor.
-- `KeeperStakingVault` — keepers drive settlement via a callback-based
-  trade (`executeSwap`) or a direct surplus bounty (`executeSettle`).
+- `KeeperStakingVault` — keepers drive settlement via callback-based
+  trade (`executeSwap`) or callback-based no-trade settlement
+  (`executeSettle`); both functions follow the same push-callback-pull
+  pattern.
 - `CowStakingVault` — deferred. Future subclass that integrates with
   CoW Protocol's solver network via ERC-1271.
 
@@ -143,14 +145,19 @@ respectively. Compare against `(targetBase, targetQuote) = (B × frac,
 | 4 | `b < targetBase AND q < targetQuote` | Underwater |
 
 **Case 1 (NoSwapNeeded).** The vault holds enough of both tokens. No
-trade is needed; settlement is purely accounting. The surplus over
-`(B × frac, (Q + T) × frac)` is routed differently depending on the
-caller:
-- Owner-side `settle()` (base contract): surplus flows into the reward
-  buffer; the owner claims it via `claimRewards()`.
-- Permissionless `executeSettle()` (keeper subclass): surplus flows to
-  the caller as a bounty, compensating gas and incentivizing
-  permissionless settlement.
+trade is needed; settlement is purely accounting. The owner-side floor
+`(B × frac, (Q + T) × frac)` is locked into buffers (B and Q to
+unstake, T to reward). Surplus over the floor is routed depending on
+the caller:
+- Owner-side `settle()` (base contract): the surplus stays in the
+  vault and flows into the reward buffer; the owner claims it via
+  `claimRewards()`.
+- Permissionless `executeSettle()` (keeper subclass): the surplus is
+  pushed to a caller-supplied callback. Whatever the callback returns
+  flows into the reward buffer (via the same `_settleBuffersAndStake`
+  balance-delta logic as `executeSwap`); whatever the callback retains
+  externally is the caller's profit. The vault is agnostic to how the
+  callback distributes the surplus.
 
 In both cases the owner-side floor `(B × frac, (Q + T) × frac)` is
 preserved.
@@ -476,16 +483,19 @@ the base.
 
 ### 8.2 KeeperStakingVault
 
-Adds two permissionless settlement entry points:
+Adds two permissionless settlement entry points, both following the
+same push-callback-pull pattern:
 
 **`executeSwap(...)` — Cases 2/3, full close, callback-based.** A
 keeper provides a callback contract; the vault closes the entire
-position, pushes the bid token (`tokenOut`) to the callback, and
-expects at least `amountInMin` of the ask token (`tokenIn`) returned
-within the same call frame. Keepers typically wrap `executeSwap` in a
-flash-loan callback (UV3 pool, Aave, Balancer) to source `tokenIn`
-without pre-funded inventory. Keepers profit from the spread between
-the LVR-implied rate and external markets.
+position, pushes the surplus token (`tokenOut`, the side the vault
+has too much of) to the callback, and expects at least `amountInMin`
+of the deficit token (`tokenIn`) returned within the same call frame.
+Keepers typically use the surplus tokens to source the deficit
+externally — sell the surplus on AMMs or external markets, fund the
+deficit return, keep the spread between the LVR-implied rate and
+external markets as profit. Callback overpayment (returning more
+than `amountInMin`) flows into the reward buffer for the owner.
 
 Always full close. Yield-target preservation: a partial close would
 shrink `T` proportionally, leaving the remainder exposed to further
@@ -493,28 +503,48 @@ drift. If keeper #1 closes 30%, keeper #2 may find a Case-4 position.
 The yield-target promise breaks. Keepers reaching `q ≥ Q + T` want the
 full position closed atomically.
 
-**`executeSettle(recipient, ...)` — Case 1, full close, no callback.**
+**`executeSettle(...)` — Case 1, full close, callback-based.**
 A permissionless caller triggers settlement when both surpluses are
-present. The vault fills the unstake buffer with `(B, Q)` and the
-reward buffer with `T` (the yield target portion). The remaining
-surplus over `(B, Q + T)` is transferred to the caller-supplied
-`recipient` as bounty. The bounty compensates gas and incentivizes
-permissionless settlement so the owner's yield target is realized
-without owner action.
+present, providing a callback contract. The vault closes the
+position, locks the floor `(B, Q + T)` into buffers (`B` and `Q` to
+the unstake buffer, `T` to the reward buffer), pushes both surpluses
+(`b - B` base and `q - (Q + T)` quote) to the callback, and credits
+whatever returns to the reward buffer via `_settleBuffersAndStake`'s
+balance-delta computation. The callback retains whatever it doesn't
+return — typically routed to a caller-chosen recipient (a Closer
+Contract's "bounty" semantic against a treasury or third party).
 
-In practice the bounty is small. Case 1 only arises when UV3 fees push
-both `b` past `B` and `q` past `Q + T` simultaneously. If either
-inequality were strict by more than a dust amount, the position would
-already have been in Case 2 or 3 and an `executeSwap` keeper would
-have settled it earlier. Case 1 is an edge case at the four-quadrant
-origin, and its bounty reflects that.
+This is structurally symmetric to `executeSwap`: both functions push
+the surplus to the callback, both credit return-amounts to the reward
+buffer via balance-delta, both keep the floor `(B, Q + T)`
+structurally inviolable. The asymmetry is parametric: `executeSwap`
+pushes one token (the surplus side) and demands at least
+`amountInMin` of the other returned (the deficit must be covered for
+the floor to be reachable); `executeSettle` pushes both surpluses and
+demands no minimum return (the floor is already in buffers).
+
+The vault is agnostic to how the callback distributes the surplus. A
+simple keeper bot can route everything to its own EOA (callback
+returns nothing). A Closer Contract can split: a portion to a
+recipient as bounty, a portion to a treasury as fee, the remainder
+back to the vault for the owner's reward. The vault doesn't know or
+care; it sees the post-callback balance and credits accordingly.
+
+In practice the surplus over `(B, Q + T)` in Case 1 is small. Case 1
+only arises when UV3 fees push both `b` past `B` and `q` past
+`Q + T` simultaneously. If either inequality were strict by more
+than a dust amount, the position would already have been in Case 2
+or 3 and an `executeSwap` keeper would have settled it earlier.
+Case 1 is an edge case at the four-quadrant origin, and the surplus
+reflects that.
 
 The owner-side floor is preserved: `unstake()` plus `claimRewards()`
 returns at least `(B, Q + T)` to the owner regardless of whether
-settlement happened via `executeSwap` (with surplus in reward buffer)
-or `executeSettle` (with surplus to bounty recipient). The owner
-trades the surplus over `(B, Q + T)` for the guarantee that the
-position settles automatically when the target is reachable.
+settlement happened via `executeSwap` (with surplus over the floor
+handled by the callback) or `executeSettle` (with both surpluses
+handled by the callback). The owner trades the right to the surplus
+over `(B, Q + T)` for the guarantee that the position settles
+automatically when the target is reachable.
 
 ### 8.3 CowStakingVault (deferred)
 
@@ -548,31 +578,88 @@ The vault holds two pairs of buffers:
 
 Buffers fill **additively** across multiple settlement calls. A vault
 may settle in pieces (multiple partial swaps, then a final swap or
-settle, etc.); each call adds to existing buffer balances. Drains zero
-out the respective buffers and transfer to owner.
+settle, etc.); each call adds to existing buffer balances. Drains
+zero out the respective buffers and transfer to owner.
 
-Per-path buffer increments (and bounty/recipient flow where applicable):
+Buffers are filled by `_settleBuffersAndStake`, which computes the
+post-call balance deltas (vault balance after all transfers complete,
+minus the pre-close snapshot) and credits:
 
-| Path | Where | unstakeBase += | unstakeQuote += | rewardBase += | rewardQuote += | Direct to recipient |
-|------|-------|----------------|------------------|---------------|----------------|---------------------|
-| `swap` (Case 2) | Base | B × frac | Q × frac | b − B × frac | q + amountIn − Q × frac | — |
-| `swap` (Case 3) | Base | B × frac | Q × frac | b + amountIn − B × frac | q − Q × frac | — |
-| `settle` (Case 1) | Base | B × frac | Q × frac | b − B × frac | q − Q × frac | — |
-| `executeSwap` (Case 2) | Keeper | B | Q | b − B | q + amountIn − Q | — |
-| `executeSwap` (Case 3) | Keeper | B | Q | b + amountIn − B | q − Q | — |
-| `executeSettle` (Case 1) | Keeper | B | Q | 0 | T | b − B (base), q − (Q + T) (quote) |
+- `unstakeBuffer*` += `(B × frac, Q × frac)` — the principal allocation.
+- `rewardBuffer*` += whatever else the vault holds.
 
-Note the asymmetry between `settle` and `executeSettle`: the base
-`settle` routes the entire surplus (including any base-side surplus
-and the `T`-portion of the quote-side surplus) into the reward buffers
-for the owner. The subclass `executeSettle` keeps `T` for the owner in
-the reward buffer but routes the surplus over `(B, Q + T)` to the
-caller-supplied recipient as bounty. Both preserve the owner-side
-floor `(B, Q + T)`.
+This is **balance-delta accounting**. The buffers are filled from what
+is actually present in the vault after the function's transfers, not
+from formulas applied to the close-output `(b, q)`. As a result, the
+buffer fills depend on what each settlement path transfers in/out
+during its operation.
 
-For `executeSwap`, callback overpayment (callback returning more than
-`amountInMin`) flows into the appropriate reward buffer slot via the
-balance-delta computation in `_settleBuffersAndStake`.
+Per-path post-call buffer increments:
+
+| Path                       | Where  | unstakeBase | unstakeQuote | rewardBase           | rewardQuote          |
+|----------------------------|--------|-------------|--------------|----------------------|----------------------|
+| `swap` (Case 2)            | Owner  | B × frac    | Q × frac     | 0                    | T × frac             |
+| `swap` (Case 3)            | Owner  | B × frac    | Q × frac     | 0                    | T × frac             |
+| `settle` (Case 1)          | Owner  | B × frac    | Q × frac     | b − B × frac         | q − Q × frac         |
+| `executeSwap` (Case 2)     | Keeper | B           | Q            | 0                    | q + amountIn − Q     |
+| `executeSwap` (Case 3)     | Keeper | B           | Q            | b + amountIn − B     | T                    |
+| `executeSettle` (Case 1)   | Keeper | B           | Q            | r_base               | T + r_quote          |
+
+**Variables:**
+
+- `frac` = `liquidity / posLiq` for partial-capable owner paths.
+  Always 1 for keeper paths (full close).
+- `amountIn` (`executeSwap` only) = the amount of `tokenIn` returned
+  by the callback (≥ `amountInMin`). Overpayment lands in the
+  corresponding reward slot — `rewardQuote` in Case 2 (`tokenIn` =
+  quote); `rewardBase` in Case 3 (`tokenIn` = base).
+- `r_base`, `r_quote` (`executeSettle` only) = base and quote returned
+  by the callback. No minimum is enforced; whatever returns lands in
+  the reward buffer. The callback may return `(0, 0)` (full surplus
+  retained externally), the full surplus (returned to vault), or
+  anything in between, including overpayment.
+
+**Notes on the table:**
+
+- **Owner `swap` (Cases 2, 3) always produces reward fills `(0, T × frac)`.**
+  Owner-side swap pays exactly the case-derived `amountIn` and
+  receives exactly the case-derived `amountOut` (no overpayment
+  semantics). After the swap, the vault retains exactly
+  `(B × frac, (Q + T) × frac)`. The buffer fills are
+  `(B × frac, Q × frac)` to unstake and `(0, T × frac)` to reward.
+
+- **Owner `settle` (Case 1) routes the entire surplus to reward.**
+  No transfers happen during owner-settle (all freed amounts stay
+  in the vault), so the buffer fills cover the full close output
+  `(b, q)` minus the unstake portion.
+
+- **Keeper `executeSwap` reward fills depend on callback return.**
+  The vault pushes the surplus token to the callback (`b - B` base
+  in Case 2; `q - (Q + T)` quote in Case 3) and receives at least
+  `amountInMin` of the deficit-side token back. Overpayment lands
+  in the corresponding reward buffer slot. The non-pushed-out side
+  always fills to exactly `T` (Case 3 rewardQuote) or `0` (Case 2
+  rewardBase, since the surplus was pushed out) because the floor
+  `(B, Q + T)` is preserved by construction.
+
+- **Keeper `executeSettle` is symmetric on both sides.** The vault
+  pushes both surpluses to the callback and credits whatever returns
+  to the reward buffer. The owner's floor `(B, Q + T)` is locked
+  into the buffers (B and Q to unstake; T to reward) before the
+  callback is invoked, so the floor is structurally inviolable
+  regardless of callback behavior. If the callback retains
+  everything externally, `r_base = r_quote = 0` and the reward
+  buffer is exactly `(0, T)`. If the callback returns the full
+  surplus, the reward buffer captures all of it.
+
+The `executeSettle` callback design replaces an earlier
+`executeSettle(recipient)` direct-transfer design. The old design
+hardcoded the bounty routing as a vault parameter; the new design
+moves routing into the callback contract, where it can be combined
+with treasury-fee logic, owner-vs-third-party recipient policies, and
+other Closer Contract concerns. The vault becomes agnostic to the
+bounty mechanic and keeps a uniform pattern across both `execute*`
+functions.
 
 ## 10. State machine
 
@@ -601,18 +688,21 @@ The base contract defines three persistent states:
 in `Staked`.
 
 Subclasses with callback-based permissionless paths add transient
-states. `KeeperStakingVault` adds:
+states. `KeeperStakingVault` adds two:
 
 - `ExecuteSwapInProgress` (transient, set during the `executeSwap`
   callback frame; reverts to `Settled` on successful return).
+- `ExecuteSettleInProgress` (transient, set during the `executeSettle`
+  callback frame; reverts to `Settled` on successful return).
 
-The transient state is not just for reentrancy protection — it also
-makes the in-progress condition observable. An indexer seeing an
-`ExecuteSwapInitiated` event without a matching `Swap` event in the
-same transaction knows the call reverted. And because base entry
-points all check for `state == Staked` strictly, the transient state
-naturally blocks all base functions during the callback frame, layered
-on top of OpenZeppelin's `nonReentrant`.
+The transient states are not just for reentrancy protection — they
+also make the in-progress condition observable. An indexer seeing an
+`ExecuteSwapInitiated` or `ExecuteSettleInitiated` event without a
+matching `Swap` or `Settle` event in the same transaction knows the
+call reverted. And because base entry points all check for
+`state == Staked` strictly, the transient states naturally block all
+base functions during the callback frame, layered on top of
+OpenZeppelin's `nonReentrant`.
 
 ## 11. Pricing and oracle stance
 
@@ -749,11 +839,28 @@ Decisions made during chat-mode design that are now baked in:
   subclasses to extend the state set with their own values starting
   at 3 without forking the enum or adding cross-subclass coupling.
 
-- **Bounty-as-surplus in `executeSettle`.** The bounty for Case 1 in
-  the keeper subclass is the surplus over `(B, Q + T)`. The
-  yield-target T itself stays with the owner via the reward buffer.
-  Owner trades the surplus against the guarantee that the position
-  settles automatically when the target is reached.
+- **`executeSettle` is structurally symmetric with `executeSwap`.**
+  An earlier draft of this RFC had `executeSettle(recipient, ...)`
+  as a no-callback function that transferred the surplus over
+  `(B, Q + T)` directly to a caller-supplied recipient. The current
+  design replaces this with a callback pattern symmetric to
+  `executeSwap`: the floor `(B, Q + T)` is locked into buffers
+  first, both surpluses are pushed to the callback, and whatever
+  the callback returns flows into the reward buffer via
+  `_settleBuffersAndStake`'s balance-delta logic. This makes the
+  vault agnostic to bounty routing (a Closer Contract handles it),
+  and gives a uniform settlement-routing pattern across both
+  `execute*` functions.
+
+- **Surplus routed through callback in `executeSettle`.** The
+  surplus over `(B, Q + T)` in Case 1 is pushed to the callback;
+  the callback decides what to return to the vault (rewardBuffer
+  for the owner) versus retain externally (caller's profit /
+  third-party bounty / treasury fee). The yield-target T itself
+  always stays with the owner via the reward buffer; it is locked
+  in before the callback is invoked. Owner trades the right to the
+  surplus against the guarantee that the position settles
+  automatically when the target is reached.
 
 - **Underwater = T-escapable.** Mathematically Case 4 is only
   reachable when `T > 0`. Setting `T = 0` always makes the position
@@ -762,41 +869,42 @@ Decisions made during chat-mode design that are now baked in:
 
 - **No oracle, no TWAP.** Earlier drafts proposed a 5%-discount Case
   for both-surplus situations using TWAP-spot pricing. Replaced by
-  the `executeSettle` bounty mechanism. The vault is now fully
+  the `executeSettle` callback mechanism. The vault is now fully
   oracle-free.
 
-- **Overpayment to reward in `executeSwap`.** Callback overpayment
-  flows into the reward buffer via the post-call balance-delta
-  computation. This makes defensive callback implementations safe
-  (round-up buffers, slippage cushions, flash-loan fee margins).
+- **Overpayment to reward in `execute*` callbacks.** Callback
+  overpayment (returning more than the minimum required, or any
+  return at all in `executeSettle`) flows into the reward buffer
+  via the post-call balance-delta computation in
+  `_settleBuffersAndStake`. This makes defensive callback
+  implementations safe (round-up buffers, slippage cushions,
+  flash-loan fee margins) and uniform across both `execute*`
+  functions.
 
 - **Owner-side floor as central invariant.** All settlement paths,
   base or subclass, MUST preserve `unstake() + claimRewards() ≥
   (B × frac, (Q + T) × frac)` for any settled fraction `frac`. This
   is the protocol's contract with the position owner, and it is the
-  one thing subclasses MUST NOT break.
+  one thing subclasses MUST NOT break. In the keeper subclass,
+  the floor is locked into buffers BEFORE any callback runs,
+  making it structurally inviolable regardless of callback
+  behavior.
 
 ## 15. Open questions
 
-- **Bounty floor for `executeSettle()`.** Should the function revert
-  if both surpluses are zero (boundary case)? Current decision: no,
-  because the position *is* settle-able and an owner-affiliated
-  helper may want to trigger settlement even without bounty. A bot
-  operator who only cares about profit will simply not call when the
-  bounty is zero.
+- **`executeSettle` callback retaining nothing.** The function does
+  not revert if `baseSurplus == 0 AND quoteSurplus == 0` (boundary
+  case `b == B AND q == Q + T`). The position settles; the callback
+  is invoked with zero-amount pushes; reward buffer receives only
+  T. Caller bears their gas with no surplus distribution. Decision:
+  keep the no-revert behavior so an owner-affiliated helper can
+  trigger settlement even without bounty; bot operators self-select
+  by checking `quoteSettle()` first.
 
 - **Recipient for `swap()`.** Currently `recipient` is mandatory and
   cannot be `address(0)`. Should `address(0)` be interpreted as
   "owner"? Decision: no, explicitness preferred. Owner specifies
   `recipient = msg.sender` if they want to send to themselves.
-
-- **Permissionless `executeSettle()` recipient policy.** Should there
-  be any policy on who can be the recipient (e.g., must equal
-  `msg.sender`)? Currently no — operator can route to any address.
-  Counter-argument that no abuse vector exists: the owner's
-  deposit-plus-target is preserved regardless; only the small
-  surplus is at stake, and it's already routed away from the owner
-  by design.
 
 - **Future `decreaseStake()` symmetry.** Currently no path exists to
   reduce position size without going through full settlement. A

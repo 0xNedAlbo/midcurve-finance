@@ -662,11 +662,11 @@ Subclasses planned but NOT specified in this document:
 
 **`KeeperStakingVault`** (`spec-0003c-keeper-staking-vault.md`):
 - Adds `executeSwap` (Cases 2/3, push-callback-pull, full close).
-- Adds `executeSettle` (Case 1, surplus-as-bounty to caller, full close).
-- Adds `STATE_EXECUTE_SWAP_IN_PROGRESS = 3`.
-- Adds `IExecuteSwapCallback` interface.
+- Adds `executeSettle` (Case 1, push-callback-pull, full close, structurally symmetric with `executeSwap`).
+- Adds `STATE_EXECUTE_SWAP_IN_PROGRESS = 3` and `STATE_EXECUTE_SETTLE_IN_PROGRESS = 4`.
+- Adds `IExecuteSwapCallback` and `IExecuteSettleCallback` interfaces.
 - `_afterStake` is no-op (no setup needed beyond base).
-- Permissionless actors are direct keepers, typically using flash loans (UV3 pools, Aave) to bridge `tokenIn` during the callback frame.
+- Permissionless actors are direct keepers; both functions push surplus tokens to the callback target, and `_settleBuffersAndStake` credits whatever returns to the reward buffer.
 
 **`CowStakingVault`** (deferred):
 - Adds `executeSwap` via ERC-1271 signature path, settled by CoW Protocol solvers.
