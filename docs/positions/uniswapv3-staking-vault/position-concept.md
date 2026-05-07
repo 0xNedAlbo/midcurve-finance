@@ -5,7 +5,12 @@
 > This document fixes the position's identity, lifecycle, and economic
 > invariant. It is the north star for Phase 2 (metrics) and Phase 3 (UI).
 > See [mental-model.md](./mental-model.md) for the user-facing framing
-> that motivates the decisions captured here.
+> that motivates the decisions captured here. Authoritative on-chain
+> sources are [rfc-0003-staking-vault.md](./rfc-0003-staking-vault.md)
+> for the architecture, [spec-0003b-abstract-staking-vault.md](./spec-0003b-abstract-staking-vault.md)
+> for the abstract base and `ManualStakingVault`, and
+> [spec-0003c-keeper-staking-vault.md](./spec-0003c-keeper-staking-vault.md)
+> for `KeeperStakingVault`.
 
 ## 1.1 Identity
 
@@ -34,17 +39,38 @@ proliferation.
 The vault address is globally unique per chain; each vault is its own
 EIP-1167 clone with its own address. The wrapped UV3 NFT's `tokenId`
 is an internal implementation detail of the vault — one vault holds
-exactly one position over its lifetime (SPEC-0003a §1: _"One vault per
-UV3 position"_), so `tokenId` is derivable from `vaultAddress` and is
-not part of the position's identity.
+exactly one position over its lifetime (RFC-0003 §13: _"Each vault
+wraps exactly one NFT."_), so `tokenId` is derivable from
+`vaultAddress` and is not part of the position's identity.
+
+**Subclass identity is metadata, not part of the hash.** The contract
+ships as an abstract base plus concrete subclasses
+(`ManualStakingVault`, `KeeperStakingVault`, deferred
+`CowStakingVault`); see RFC-0003 §5. The chosen subclass is **fixed
+at deploy time** and queryable on-chain via `vault.kindLabel()`
+(returning a `keccak256("manual-staking-vault-v1")`-style identifier).
+
+The subclass is _not_ part of `positionHash` — it would inflate the
+identity space without changing what the position _is_ from the
+ledger's perspective: the same `(B, Q, T)` settlement contract, the
+same buffer mechanics, the same owner-side floor `(B × frac,
+(Q + T) × frac)` per RFC-0003 §6.4. The subclass only changes _who
+can act_ permissionlessly (nobody in Manual; keepers in Keeper; CoW
+solvers in the deferred Cow variant). This belongs in the type-specific
+metric `state.kindLabel`, not in the identity. Phase 2 picks this up.
+
+The factory consults a vault implementation registry
+(SPEC-0003d, separate) to deploy the right clone for the user's
+chosen subclass. Discovery (Phase 5) and the Add-Position flow
+(Phase 3) need to handle this multi-kind surface explicitly.
 
 **Owner model**: Owner-bound 1:1
 
 A single user owns a single contract clone. Ownership is encoded
-on-chain at clone initialisation and is structurally immutable —
-SPEC-0003a §1: _"The owner address is set once during clone
-initialization. Once set, it MUST NOT be mutable. No transfer function,
-no ownership token, no upgrade mechanism that could rebind it."_
+on-chain at clone initialisation and is structurally immutable — the
+owner address is set once during clone initialization and cannot be
+changed (no transfer function, no ownership token, no upgrade
+mechanism that could rebind it).
 
 The factory's `createVault()` performs deployment AND initialisation
 atomically in the same call frame, closing the standard EIP-1167
@@ -63,52 +89,63 @@ Three user-facing states:
   stake into a single transaction by convention. We retain the state
   in the model as the formal origin of the lifecycle, not as a
   realistic user-facing state.
-- **`Staking`** — UV3 position is open and active. `swap()` is
-  callable, all owner levers (top-up, yield-target adjustment, partial
-  unstake) are available. The normal operating state.
+- **`Staking`** — UV3 position is open and active. All owner levers
+  (top-up via `increaseStake`, yield-target adjustment, partial
+  swap/settle, drains) are available. Permissionless paths
+  (`executeSwap` / `executeSettle`) are available in subclasses that
+  expose them. The normal operating state.
 - **`Settled`** — position is fully closed (`liquidity == 0`). No new
-  operations possible, but `unstake()` and `claimRewards()` remain
-  callable to drain any buffered amounts the final settlement filled.
-  Terminal.
+  settlement operations possible, but `unstake()` and `claimRewards()`
+  remain callable to drain any buffered amounts the final settlement
+  filled. Terminal.
 
 **Naming note.** The user-facing name `Staking` deliberately diverges
-from SPEC-0003a's on-chain storage name `Staked`. Gerund vs. past
-participle is a meaningful distinction here: the on-chain storage slot
-records that staking _has occurred_, while the user-facing state names
-the activity that _is occurring_. Both names are correct in their own
-domain; the divergence should not surprise readers who put SPEC and
-this document side by side.
+from the on-chain storage name `Staked` (RFC-0003 §10). Gerund vs.
+past participle is a meaningful distinction here: the on-chain
+storage slot records that staking _has occurred_, while the
+user-facing state names the activity that _is occurring_. Both names
+are correct in their own domain; the divergence should not surprise
+readers who put SPEC and this document side by side.
 
-**On-chain-only state.** SPEC-0003a §4 also defines a
-`FlashCloseInProgress` storage state. It is a transient reentrancy
-lock that lives only inside a single transaction — it is never
-observable as the persistent state between transactions, so it is not
-part of the user-facing lifecycle. It belongs to the contract's
-implementation, not to the position's semantics.
+**Subclass-specific transient states.** The base contract exposes
+only the three persistent states above. Subclasses with callback-based
+permissionless paths add transient states that exist only inside a
+single transaction's execution frame. `KeeperStakingVault` adds
+`ExecuteSwapInProgress` (RFC-0003 §10), set during the keeper-supplied
+callback frame and reverted on successful return. These transient
+states are never observable as the persistent state between
+transactions and are not part of the user-facing lifecycle. They
+belong to the contract's implementation, not to the position's
+semantics.
 
 ### Transitions
 
-| From | To | Trigger | Class | Reversible? |
-|---|---|---|---|---|
-| `Empty` | `Staking` | `stake()` (initial) | owner-initiated | no |
-| `Staking` | `Staking` | `stake()` (top-up) | owner-initiated | self-loop |
-| `Staking` | `Staking` | `setYieldTarget()` | owner-initiated | self-loop |
-| `Staking` | `Staking` | `setPartialUnstakeBps()` / `increasePartialUnstakeBps()` | owner-initiated | self-loop |
-| `Staking` | `Staking` | `swap()` with `effectiveBps < 10000` | permissionless | self-loop |
-| `Staking` | `Staking` | `unstake()` / `claimRewards()` | owner-initiated | self-loop |
-| `Staking` | `Staking` | `flashClose(bps < 10000)` | owner-initiated | self-loop |
-| `Staking` | `Settled` | `swap()` with `effectiveBps == 10000` | permissionless | no |
-| `Staking` | `Settled` | `flashClose(10000)` | owner-initiated | no |
-| `Settled` | `Settled` | `unstake()` / `claimRewards()` | owner-initiated | self-loop |
+The transition table is split into rows that exist in every subclass
+(rows from the abstract base) and rows that exist only in specific
+subclasses (`KeeperStakingVault` for now; `CowStakingVault` deferred).
+
+| From | To | Trigger | Class | Subclass | Reversible? |
+|---|---|---|---|---|---|
+| `Empty` | `Staking` | `stake()` (initial) | owner | all | no |
+| `Staking` | `Staking` | `increaseStake()` (top-up) | owner | all | self-loop |
+| `Staking` | `Staking` | `setYieldTarget()` | owner | all | self-loop |
+| `Staking` | `Staking` | `swap(liquidity)` (partial, Cases 2/3) | owner | all | self-loop |
+| `Staking` | `Staking` | `settle(liquidity)` (partial, Case 1) | owner | all | self-loop |
+| `Staking` | `Staking` | `unstake()` / `claimRewards()` | owner | all | self-loop |
+| `Staking` | `Settled` | `swap(liquidity)` (full close) | owner | all | no |
+| `Staking` | `Settled` | `settle(liquidity)` (full close, Case 1) | owner | all | no |
+| `Staking` | `Settled` | `executeSwap()` (Cases 2/3, full only) | permissionless | Keeper | no |
+| `Staking` | `Settled` | `executeSettle(recipient)` (Case 1, full only) | permissionless | Keeper | no |
+| `Settled` | `Settled` | `unstake()` / `claimRewards()` | owner | all | self-loop |
 
 `multicall()` is not a transition in its own right; it composes the
 transitions above and inherits their state checks per inner call.
 
-### Two structural properties
+### Three structural properties
 
 **Forward-monotonic.** There is no path from `Staking` back to `Empty`,
-and no path from `Settled` back to `Staking`. SPEC-0003a §19 enumerates
-the deliberate omissions: no `cancelStake()`, no range adjustment, no
+and no path from `Settled` back to `Staking`. RFC-0003 §13 enumerates
+the deliberate omissions: no cancel-stake, no range adjustment, no
 position re-mint. The lifecycle is a strict forward axis. For the UI
 this means the lifecycle badge has no surprises; for the indexer it
 means a simple monotonic state derivation from event order.
@@ -116,10 +153,20 @@ means a simple monotonic state derivation from event order.
 **No automatic transitions.** Nothing in this design happens
 chain-driven without an explicit transaction. Even `Settled` is not
 reached automatically when some market condition flips — it always
-requires a caller (executor via `swap`, owner via `flashClose`). This
+requires a caller (owner via `swap`/`settle`, keeper via
+`executeSwap`/`executeSettle` in the Keeper subclass). This
 distinguishes the vault from positions with auto-liquidation
-(lending, perps). Phase 4 (on-chain pipeline) does not need a
+(lending, perps). The data pipeline (Phase 5) does not need a
 background watcher for passive transitions.
+
+**Permissionless paths are full-close only.** Where a subclass exposes
+permissionless callers, they always close the entire remaining
+position. Partial settlement is owner-only. RFC-0003 §8.2 makes this
+explicit: a permissionless partial close would shrink `T`
+proportionally on the residual liquidity, and a subsequent keeper call
+on the residual could find a Case-4 position — the yield-target
+promise breaks across keeper calls. Partial close therefore stays in
+the owner's hands across all subclasses.
 
 ## 1.3 Economic invariant
 
@@ -129,43 +176,48 @@ The vault converts a continuously-rebalancing UV3 position into a
 **terminable fixed-deposit construct with an embedded limit-order
 clause**. The owner provides an inventory `(B, Q)`, defines a yield
 expectation `T` in quote units, and on regular settlement receives
-exactly `(B, Q + T)` back. Market activity in between is absorbed by
-the vault; the owner sees neither the tick-crossings nor the range
-behaviour of the wrapped NFT.
+exactly `(B, Q + T)` back per closed fraction. Market activity in
+between is absorbed by the vault; the owner sees neither the
+tick-crossings nor the range behaviour of the wrapped NFT.
 
 The user's exposure decomposes into two distinct components:
 
-- A **deterministic quote claim** of size `T` (the yield target),
-  realised only if a settlement actually occurs.
-- An **underwater residual risk** on the principal `(B, Q)` itself,
-  realisable if the owner exits via `flashClose` while market
-  conditions cannot deliver `(B, Q + T)`.
+- A **deterministic quote claim** of size `T`, realised only if a
+  settlement actually occurs.
+- A **target-flexibility lever** on the principal: by raising or
+  lowering `T` mid-life, the owner trades expected yield against
+  exit optionality. At `T = 0` the position is always settle-able;
+  at `T > 0` settlement is market-conditional.
 
-These two components are not "two parts of one return" — they are two
-separate claims with different guarantee classes, and the owner
+These two components are not "two parts of one return" — they are
+two separate claims with different guarantee classes, and the owner
 chooses via `T` which class is active. This is the central
 characterisation; everything below sharpens it.
 
 ### The token-conservation invariant
 
-For every settlement event closing a fraction `bps` of the staked
+For every settlement event closing a fraction `frac` of the staked
 liquidity, the vault structurally guarantees:
 
-> **The owner receives at least `(B × bps/10000, Q × bps/10000)` of
-> principal and at least `T × bps/10000` of quote-side yield, for the
-> closed fraction `bps`.**
+> **The owner receives at least `(B × frac, (Q + T) × frac)` for the
+> closed fraction, drainable via `unstake()` plus `claimRewards()`.**
 
-This invariant is encoded in `swap()`: the executor _must_ fill the
-deficit on each side, otherwise the transaction reverts (SPEC-0003a §13).
-The invariant is range-independent (evaluated only at settlement,
-never continuously), top-up-stable (scales proportionally with each
-top-up per SPEC §8.2), and partial-stable (additive across multiple
-settlements per `bps`).
+This is the **owner-side floor** (RFC-0003 §6.4). It is encoded by
+construction in the base contract's internal helper
+`_settleBuffersAndStake`, which credits exactly `(B × frac, Q × frac)`
+to the unstake buffer and the entire excess to the reward buffer in
+every base-contract code path. Subclasses inherit the floor and MUST
+NOT break it (RFC-0003 §7.2); per-subclass review enforces this.
+
+The floor is range-independent (evaluated only at settlement, never
+continuously), top-up-stable (scales proportionally with each
+`increaseStake` per RFC-0003 §6.2), and partial-stable (additive
+across multiple settlement calls).
 
 A property of the underlying UV3 primitive does most of the work here:
 
 > **Closing a UV3 position via `decreaseLiquidity + collect` never
-> yields both `b < B` and `q < Q` simultaneously.**
+> yields both `b < B × frac` and `q < Q × frac` simultaneously.**
 
 The bonding curve traverses a single conversion direction at a time
 (price up → sells base, gains quote; price down → gains base, sells
@@ -177,101 +229,127 @@ property, not a vault property — the vault inherits it.
 
 The owner chooses, via `T`, which of two guarantee classes is active:
 
-**Strong guarantee (T = 0): principal-only, structurally always
+**Strong guarantee (`T = 0`): principal-only, structurally always
 honourable.** With `T = 0`, the partial-target reduces to
-`(B × bps/10000, Q × bps/10000)`. By the UV3 property above, the
-condition `b < targetBase AND q < targetQuote` becomes structurally
-impossible — every settlement falls into Case 1, 2, or 3 of SPEC-0003a
-§11. The vault is **always liquidatable via `swap()`**, and the owner
-recovers principal `(B, Q)` exactly. There is no market scenario that
-prevents principal recovery. The vault is never structurally
-insolvent against a `T = 0` claim.
+`(B × frac, Q × frac)`. By the UV3 property above, the condition
+`b < B × frac AND q < Q × frac` becomes structurally impossible —
+every settlement falls into Case 1, 2, or 3 of RFC-0003 §4. The vault
+is **always settle-able**, and the owner recovers principal `(B, Q)`
+exactly. There is no market scenario that prevents principal recovery.
+The vault is never structurally insolvent against a `T = 0` claim.
 
-**Conditional guarantee (T > 0): principal-plus-yield, market-dependent.**
-With `T > 0`, the partial-target widens to
-`(B × bps/10000, (Q + T) × bps/10000)`, and a Case-4 region opens up
-in the inventory space:
-`Q × bps/10000 ≤ q < (Q + T) × bps/10000` combined with `b < targetBase`.
-This region exists _only because_ `T > 0`. In Case 4, `swap()` reverts
-with `Underwater()`. The owner can:
+**Conditional guarantee (`T > 0`): principal-plus-yield,
+market-dependent.** With `T > 0`, the partial-target widens to
+`(B × frac, (Q + T) × frac)`, and a Case-4 region opens up in the
+inventory space: `Q × frac ≤ q < (Q + T) × frac` combined with
+`b < B × frac`. This region exists _only because_ `T > 0`. In Case 4,
+all settlement paths revert (`swap`, `settle`, `executeSwap`,
+`executeSettle` all require a non-Underwater state). The owner can:
 
 - wait for market conditions to change (the vault stays in `Staking`,
-  fees may accumulate, price may move back into a settleable region),
+  fees may accumulate, price may move back into a settle-able region),
 - call `setYieldTarget(0)` (or any lower value that the current
   inventory can support) — this collapses Case 4 back into Cases 1–3
-  and restores `swap()` callability, but at the cost of forgoing the
-  original yield claim,
-- exit via `flashClose` (see below) at the realised market value.
+  and restores settle-ability, at the cost of forgoing the original
+  yield claim.
 
 Underwater is therefore not "the market broke the vault" — it is "the
 owner's yield claim exceeds the market's current ability to deliver".
 The owner caused it (by setting `T`), and the owner can resolve it
-(by lowering `T`).
+(by lowering `T`). Critically, **the resolution is not a loss path**:
+when `T` is lowered enough to clear Underwater, settlement returns
+the floor `(B × frac, (Q' + T') × frac)` for the new target `T'` —
+including `(B × frac, Q × frac)` if `T' = 0`. Principal is never
+forfeit through the Underwater-escape mechanism. The cost is purely
+forgone yield.
 
-### Three exit paths
+### Settlement paths by subclass
 
-When the owner wants to terminate the position, three paths are
-available, in descending order of accounting cleanliness:
+The settlement menu depends on which subclass the vault clone is.
+Owner-side paths exist in every subclass; permissionless paths are
+subclass-specific and always full-close.
 
-**(1) Wait for an external executor.** The vault sits in `Staking`
-until a third-party executor (solver, MEV bot, keeper) calls `swap()`
-because external conditions make the offered rate profitable for them.
-Maximally clean: the four canonical events (`Stake`, `Swap`,
-`Unstake`, `ClaimRewards`) appear in their intended order, the owner
-is uninvolved during the swap itself, and tokens never flow through
-the owner's wallet during settlement. Cost: waiting time, market-
-dependent.
+**Owner-side, all subclasses:**
 
-**(2) Self-execute via `swap()`.** The owner calls `swap()` themselves,
-supplying the deficit-side liquidity (quote in Case 2, base in Case 3)
-from their own wallet. This stays fully inside the staking semantics:
-the event sequence is identical to (1), with the owner address in the
-`executor` slot of the `Swap` event. Three separable token movements
-result — owner-as-executor sends `amountIn`, owner-as-executor receives
-`amountOut`, owner-as-owner later receives `unstake()` and
-`claimRewards()` payouts — and each is bookable independently in the
-owner's accounting. The "below-spot" component the owner appears to
-pay themselves is a temporary capital lock-up, not an economic loss:
+- **`swap(liquidity, ...)` for Cases 2/3.** The owner closes a
+  fraction of the position and trades against the vault at the
+  LVR-implied rate from the post-close `(b, q)`. They supply the
+  deficit-side amount (quote in Case 2, base in Case 3) and receive
+  the surplus-side amount. Slippage bounds (`amountInMax`,
+  `amountOutMin`) protect against pool drift between quote and call.
+  Partial-capable. Reverts in Case 1 (use `settle`) and Case 4
+  (lower `T` first).
+- **`settle(liquidity, ...)` for Case 1.** The owner closes a
+  fraction without any trade because both surpluses are already
+  present. The buffers fill with `(B × frac, Q × frac)` on the
+  unstake side and the entire surplus over those amounts on the
+  reward side. Use case: the position has been running well, fees
+  push `q` significantly above `(Q + T) × frac`, the owner harvests
+  accumulated surplus without fully exiting. Partial-capable.
+  Reverts in Cases 2, 3 (use `swap`) and Case 4 (lower `T` first).
+- **`setYieldTarget(newT)` for Underwater escape.** Lowering `T` (or
+  setting it to zero) collapses Case 4 back into Cases 1/2/3,
+  restoring settle-ability via the matching path above.
 
-- At `T = 0`, the swap is a structurally fair inventory cycle; the
-  owner's net token position changes by zero (excluding gas).
-- At `T > 0`, the swap funds the `T` payout from the owner's own
-  liquidity, which then returns to them via `claimRewards()`. Again
-  net zero, with a visible accounting span across two movements that
-  makes the `T` payment auditable.
+**Permissionless, `KeeperStakingVault` only:**
 
-This path is the under-appreciated middle option. It is always
-available to an owner with sufficient liquidity, which is often the
-case — an owner who sized `(B, Q)` typically holds comparable amounts
-on their wallet.
+- **`executeSwap(...)` for Cases 2/3, full close.** A keeper provides
+  a callback contract; the vault closes the entire position, pushes
+  the surplus token to the callback, and expects at least
+  `amountInMin` of the deficit token returned within the same call
+  frame. Keepers typically wrap `executeSwap` in a flash-loan
+  callback (UV3 pool, Aave, Balancer) to source the deficit token
+  without pre-funded inventory. Their profit comes from the spread
+  between the LVR-implied rate offered by the vault and external
+  markets — _not_ from the vault's reward buffer.
+- **`executeSettle(recipient, ...)` for Case 1, full close.** A
+  permissionless caller triggers settlement when both surpluses are
+  present. The vault fills the unstake buffer with `(B, Q)` and the
+  reward buffer with `T` (the yield-target portion). The remaining
+  surplus over `(B, Q + T)` is transferred to `recipient` as a
+  bounty. The bounty compensates gas and incentivises permissionless
+  Case-1 settlement so the owner's yield target is realised without
+  owner action. In practice the bounty is small: Case 1 only arises
+  when fees push both `b` past `B` and `q` past `Q + T`
+  simultaneously, and an `executeSwap` keeper would typically settle
+  the position earlier in Case 2 or 3.
 
-**(3) `flashClose(bps)`.** Externally-financed exit via a flash-loan
-callback (SPEC-0003a §15). Available when the owner has neither
-patience nor liquidity. Auto-drains all buffers in a single transaction,
-which collapses the `Stake → Swap → Unstake → ClaimRewards` event
-sequence into a compressed `FlashCloseInitiated → Unstake → ClaimRewards`
-that mixes the position-close, the flash-loan pull/repay, the external
-swap, and the settlement drain into one transaction. The accounting
-outcome is the same in net terms, but the events are no longer cleanly
-separable. Cost: flash-loan fee plus possibly forgone yield.
+### Surplus allocation across paths
 
-The cleanliness ordering — **(1) wait > (2) self-execute > (3) flashClose**
-— is what determines `flashClose`'s role in the design. It is the
-emergency option, not the default convenience. Earlier framings of
-`flashClose` as "the owner's go-to convenience function" were wrong;
-it is the path the owner takes only when neither (1) nor (2) is
-viable.
+The owner-side floor `(B × frac, (Q + T) × frac)` is preserved on
+every path. Where the surplus over that floor goes, however, depends
+on the path:
+
+| Path | Subclass | Surplus over `(B × frac, (Q + T) × frac)` flows to |
+|---|---|---|
+| `swap()` (Cases 2/3) | all | owner reward buffer |
+| `settle()` (Case 1) | all | owner reward buffer |
+| `executeSwap()` (Cases 2/3) | Keeper | owner reward buffer (callback overpayment included) |
+| `executeSettle()` (Case 1) | Keeper | caller-supplied `recipient` as bounty |
+
+Two important consequences:
+
+- The owner who runs a `ManualStakingVault` keeps every wei the
+  vault accumulates. There is no third-party leak.
+- The owner who runs a `KeeperStakingVault` only loses the Case-1
+  surplus (via `executeSettle`); in Cases 2/3 the keeper's profit
+  is external to the vault, not extracted from it. The choice
+  between Manual and Keeper is therefore not "do I sacrifice yield
+  for automation?" — it is "do I sacrifice the rare Case-1 surplus
+  for guaranteed Case-1 settlement without owner action?"
 
 ### What is emergent (not invariant)
 
 - **When** settlement occurs — depends on spot-price movement, time
-  in range, fee accumulation, executor behaviour, and owner action.
+  in range, fee accumulation, keeper behaviour (Keeper subclass),
+  and owner action.
 - **Which case** settlement falls into (1, 2, or 3) — depends on the
   position's end-state inventory.
-- **How much above `T`** of quote value accumulates — goes to the
-  executor, not the owner. From the user's perspective there is no
-  "bonus", only the deterministic `T`.
-- **Whether the position enters underwater at all** — depends on
+- **How much above `T`** of quote value accumulates — flows per the
+  surplus-allocation table above. From the user's perspective the
+  yield outcome is at least the deterministic `T`; the floor is the
+  guarantee, anything above is path-dependent.
+- **Whether the position enters Underwater at all** — depends on
   volatility and range choice relative to the chosen `T`.
 
 ### Yield: origins and mechanism
@@ -281,16 +359,18 @@ vault collapses externally into a single number:
 
 - **UV3 fees** that accumulate over the position's lifetime, on both
   token sides, collected via `collect` at settlement.
-- **LVR substance** that the executor voluntarily transfers to the
-  vault: the executor pays a below-spot rate at `swap()`, and the
-  difference between spot and the executor's input flows into the
-  reward buffer. The executor accepts this because their net is still
-  positive against external venues — the pool's tractability condition
-  is `Fee-APR > σ²/8` (see [lvr-theory-summary.md] context).
+- **LVR substance** that the settlement counterparty voluntarily
+  transfers to the vault: the counterparty (owner-as-self in
+  `swap()`, keeper in `executeSwap()`) pays a below-spot rate at
+  the trade, and the difference between spot and counterparty input
+  flows into the reward buffer. The counterparty accepts this
+  because their net is still positive against external venues — the
+  pool's tractability condition is `Fee-APR > σ²/8` (see
+  [lvr-theory-summary.md] context).
 
 Both sources flow indistinguishably into the `rewardBuffer*` slots
-(SPEC-0003a §11) and are paid to the owner via `claimRewards()`. The
-owner sees a single yield number: `T`, quote-denominated, agreed up
+and are paid to the owner via `claimRewards()`. The owner sees a
+single yield number: at least `T`, quote-denominated, agreed up
 front, paid at settlement. The decomposition into "fees" and
 "LVR-compensation" does not exist for the user — and that is by
 design.
@@ -301,29 +381,39 @@ Four risk classes, each with a clear crystallisation point:
 
 | Risk | Driver | Crystallises at |
 |---|---|---|
-| **Principal risk** | structurally **zero at `T = 0`**; non-zero only if owner exits via `flashClose` while `T > 0` is unresolved | `flashClose` call (and only if owner has not first lowered `T`) |
-| **Yield-fulfilment risk** | volatility relative to range width and `T` size | First settlement attempt; or owner's `setYieldTarget(0)` decision to abandon the claim |
-| **Liquidity risk on `flashClose`** | external flash-loan provider conditions (Aave / Balancer / Morpho) | `flashClose` call |
-| **Smart-contract risk** | bugs in vault, NFT manager, or flash-loan provider | Exploit events; mitigation is audit + time-in-production |
+| **Principal risk** | structurally **zero** through the protocol's mechanism: every settle-path returns at least `(B × frac, (Q + T) × frac)`, and Underwater escapes via `setYieldTarget(0)` settle the position at `(B × frac, Q × frac)` | Never within the protocol's mechanism — only via external smart-contract failure (see below) |
+| **Yield-fulfilment risk** | volatility relative to range width and `T` size | First settlement attempt; or the owner's `setYieldTarget(0)` decision to abandon the original claim |
+| **Smart-contract risk (base)** | bugs in vault, NFPM, or pool contracts | Exploit events; mitigation is audit + time-in-production |
+| **Smart-contract risk (subclass-specific)** | bugs in the keeper-callback surface (`KeeperStakingVault`) or solver-network integration (`CowStakingVault`, deferred) | Same; surface size grows with subclass complexity |
 
 Two risks deliberately **not** in this list:
 
 - **IL / LVR from owner perspective.** The vault absorbs both; the
   owner does not see them. The owner economically still bears LVR
-  (they cede LVR substance to the executor), but as a component of
-  "T vs. market upside" rather than a separate risk.
-- **Permissionless executor behaviour.** Not a risk in the classical
-  sense, because the executor can structurally only act under
-  conditions that preserve principal and yield. The owner does not
-  need to trust the executor.
+  (they cede LVR substance to the settlement counterparty), but as
+  a component of "T vs. market upside" rather than a separate risk.
+- **Permissionless caller behaviour.** Not a risk in the classical
+  sense, because permissionless callers can structurally only act
+  under conditions that preserve the owner-side floor. The owner
+  does not need to trust them. (`ManualStakingVault` has no
+  permissionless callers at all.)
 
-The take-away: the vault has **two guarantee classes**, and the owner
-chooses via `T` which class is active. The strong guarantee
-(principal at `T = 0`) is always available; the weaker guarantee
-(principal + `T` at `T > 0`) is market-conditional. Risk discussion
-should always specify which class is in scope.
+The take-away: the vault has **two guarantee classes**, and the
+owner chooses via `T` which class is active. The strong guarantee
+(principal at `T = 0`) is always available and structurally
+unbreakable; the weaker guarantee (principal + `T` at `T > 0`) is
+market-conditional but never costs principal — only forgone yield.
+Risk discussion should always specify which class is in scope.
 
 ## 2.1 Common metric mapping
+
+> **⚠ Phase 2 rewrite pending.** The §2 sections below were authored
+> against the earlier SPEC-0003a contract. They reference removed
+> mechanics (`partialUnstakeBps` / `effectiveBps`, `flashClose`,
+> permissionless `swap`) and need to be rewritten against
+> RFC-0003 + SPEC-0003b/c. A separate Phase-2 pass will reconcile
+> the metric mapping, type-specific `state` shape, event taxonomy,
+> and journal-posting rule with the new contract surface.
 
 **Global valuation rule.** All live valuations of quote-denominated
 quantities use the current pool price from `pool.slot0().sqrtPriceX96`.
