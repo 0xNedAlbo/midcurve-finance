@@ -131,7 +131,7 @@ The action row mirrors the NFT pattern as closely as the protocol allows. Owner-
 | Button | Visibility | Action |
 |---|---|---|
 | **`+ Stake More`** | Visible if `isOwnedByUser`. Always enabled when `vaultState != 'Settled'`. | Navigates to a top-up wizard page, analogous to the existing `IncreaseDepositPage` pattern. Atomic deposit + `increaseStake`. |
-| **`- Withdraw`** | Visible if `isOwnedByUser`. Enabled if `vaultState != 'Empty'`. | Opens the Withdraw wizard (specified below). The wizard is the unified owner-side exit path: it dispatches internally to `swap()` or `settle()` based on the current `swapStatus`, with a transparent Underwater-escape branch where applicable. |
+| **`- Withdraw`** | Visible if `isOwnedByUser`. Enabled if `vaultState != 'Empty'`. | Opens the Withdraw wizard (specified below). The wizard is the unified owner-side exit path: it dispatches internally to `swap()` or `settle()` based on the current `swapStatus`, with a transparent Underwater-escape branch where applicable, and supports two funding modes (self-execute and flashloan). |
 | **`$ Claim Funds`** | Visible if `isOwnedByUser`. Enabled if `claimableFunds > 0`. | Opens the claim-funds modal (specified below). |
 
 #### Withdraw wizard
@@ -145,9 +145,9 @@ vault buffers, ready for drain. Whether a swap is required (Cases
 2/3) or not (Case 1) is a function of the current pool state and is
 handled by the wizard internally — the user does not see it.
 
-The wizard is status-centric: the user picks a withdrawal fraction,
-and the wizard previews exactly what will happen at the current pool
-state.
+The wizard is status-centric: the user picks a withdrawal fraction
+and a funding source, and the wizard previews exactly what will
+happen at the current pool state.
 
 **Step 1 — Configure & Preview**:
 
@@ -156,19 +156,21 @@ state.
   `liquidity` parameter via `frac × state.currentLiquidity`. There is
   no on-chain "pending fraction" state — the chosen fraction lives
   only in the wizard.
+
 - **Status section** below the slider, live-updating as the slider
-  moves. Content depends on the current `swapStatus`:
+  and the funding-source toggle move. Content depends on the current
+  `swapStatus`:
 
   - **`NoSwapNeeded` (Case 1):** "Direct settlement — no trade
     required." Preview of the buffers that will fill (`unstakeBase`,
     `unstakeQuote`, `rewardBase`, `rewardQuote`), and the resulting
-    claimable-funds delta.
+    claimable-funds delta. No funding-side requirement either way,
+    so the funding-source toggle is hidden in this case.
   - **`Executable` (Cases 2/3):** Preview of the resulting trade
     (`<base in> → <quote out>` or vice versa, with effective rate
     vs. spot, e.g. `1 WETH → 1,300 USDC, 700 USDC under spot`).
-    Preview of the buffers that will fill. The user provides the
-    deficit-side amount from their own wallet; this is shown as
-    "You provide: <amount>".
+    Preview of the buffers that will fill. The funding-source
+    detail line adapts to the toggle (see below).
   - **`Underwater` (Case 4):** A red-bordered warning box —
     *"This position is currently Underwater. The vault cannot deliver
     your principal plus the configured yield target at the current
@@ -179,7 +181,8 @@ state.
     withdrawal — to re-enable yield expectation on the residual
     position, set a new target afterwards."* Below the warning, the
     same kind of preview as `Executable` shows what the vault will
-    deliver after the T=0 escape.
+    deliver after the T=0 escape, with the funding-source detail
+    line adapting to the toggle.
 
   The `swap` vs. `settle` distinction is silent (the user sees only
   the economic effect), but the Underwater-T=0 escape is **explicit
@@ -188,27 +191,41 @@ state.
   yield-expectation. The Underwater warning constitutes the wizard's
   consent moment for that consequence.
 
-- **Funding-source toggle (deferred to Phase 4):** the wizard's
-  default execution path is "you provide the deficit-side amount
-  from your wallet". A future externally-financed path (via a
-  Position Closer Contract) will be added in Phase 4. The wizard's
-  layout reserves a toggle row in this position for the second path
-  to plug in; in this iteration, only the self-funded path is
-  available, and the toggle either renders as disabled-with-tooltip
-  ("Coming soon") or is omitted entirely. The choice is left to the
-  Phase-4 implementation.
+- **Funding-source toggle row** below the status section. Two modes:
+
+  - **Self-execute mode (default):** _"You need <X> USDC additional
+    funds, which will be returned in the same transaction.
+    [ ] Use flashloan instead"_
+  - **Flashloan mode (after toggle):** _"Flash loan cost: <Y> USDC.
+    [ ] No flashloan, self execute"_
+
+  Toggling switches the entire status section to the alternative
+  path and updates economic figures accordingly. The toggle is
+  hidden when the current `swapStatus == 'NoSwapNeeded'` (Case 1
+  needs no funding either way).
+
+  The flashloan-mode execution mechanism — a Position Closer
+  Contract that wraps the vault interaction in a flash-loan
+  callback against a third-party provider — is **specified in
+  Phase 4**. Phase 3 fixes the UI surface (toggle visibility,
+  status presentation, preview-data shape) and the boundary at
+  which Phase 4 plugs in (see Step 2 below).
 
 **Step 2 — Execute Transaction**:
 
-A multicall, contents depending on the current `swapStatus`:
+A multicall, contents depending on the current `swapStatus` and the
+chosen funding-source mode.
+
+**Self-execute mode** — fully specified in Phase 3:
 
 - **`NoSwapNeeded` (Case 1):**
   1. `settle(liquidity, ...)`
   2. `unstake()`
   3. `claimRewards()`
 - **`Executable` (Cases 2/3):**
-  1. `swap(liquidity, ...)` — owner provides deficit-side amount,
-     receives surplus-side amount within the same call.
+  1. `swap(liquidity, ...)` — owner provides deficit-side amount
+     from their wallet, receives surplus-side amount within the
+     same call.
   2. `unstake()`
   3. `claimRewards()`
 - **`Underwater` (Case 4), after user confirms in Step 1:**
@@ -227,9 +244,26 @@ expectation; the wizard does not auto-restore. This is consistent
 with the no-client-persistence rule (see Yield Target Component
 below).
 
+**Flashloan mode** — UI fully specified in Phase 3 (toggle, preview,
+slider behaviour); execution mechanism specified in Phase 4
+alongside the Position Closer Contract:
+
+- The user's wallet does not need to fund the deficit-side amount;
+  a flash loan from a third-party provider (Aave, Balancer, or a
+  UV3 pool) sources it within a single transaction.
+- The exact multicall composition (entry point — vault directly or
+  through the Closer Contract; flash-loan provider; callback
+  wiring; Underwater-escape integration) is fixed in Phase 4. The
+  Phase-3 UI contract — slider value, status preview shape,
+  funding-source detail — is stable across the eventual Phase-4
+  realisation.
+
 The wizard preview requires a backend service that simulates the
-post-action state for any given `liquidity`. This service does not
-exist today and is a Phase 3.4 requirement. See §3.4.
+post-action state for any given `liquidity` and funding mode. This
+service does not exist today and is a Phase 3.4 requirement (see
+§3.4). The flashloan-mode preview's flash-loan-fee estimation is a
+Phase-4 input (the fee depends on which provider the Closer
+Contract routes through).
 
 #### Claim-funds modal
 
@@ -725,7 +759,7 @@ This section consolidates the requirements that the lower phases (5+ in the renu
 
 - **`SwitchConnectedWalletPrompt` component.** Reusable across position types; not vault-specific. Must be built.
 - **localStorage cleanup hook on position delete.** When a position is deleted, the keys `vault-card-slot:<positionHash>` (and any future per-position UI preferences) must be removed.
-- **Withdraw-wizard preview service.** A service that, given a vault position and a `liquidity` parameter (derived from the user's slider position), returns the simulated outcome at the current pool state: which `swapStatus` the call will hit, the resulting buffers (`unstakeBufferBase/Quote`, `rewardBufferBase/Quote` deltas), the trade preview if applicable (Cases 2/3), and the resulting claimable-funds delta. The service must compute the post-T=0 outcome when the current state is Underwater. Phase 4 will extend this service to also preview the externally-financed (Position Closer Contract) execution path.
+- **Withdraw-wizard preview service.** A service that, given a vault position, a `liquidity` parameter (derived from the user's slider position), and a funding-source mode (`self-execute` or `flashloan`), returns the simulated outcome at the current pool state: which `swapStatus` the call will hit, the resulting buffers (`unstakeBufferBase/Quote`, `rewardBufferBase/Quote` deltas), the trade preview if applicable (Cases 2/3), the funding-side detail (deficit amount for self-execute, flash-loan-fee estimate for flashloan), and the resulting claimable-funds delta. The service must compute the post-T=0 outcome when the current state is Underwater. The flashloan-mode preview's flash-loan-fee estimation depends on Phase 4 (the fee depends on which provider the Closer Contract routes through).
 - **Yield Target Component is on-chain-driven only.** No client-side memo, no off-chain pause/resume mechanism, no Phase 4 dependency. The component derives entirely from `state.yieldTarget`, with `uint256.max` as the off-state sentinel. Disabling automation is `setYieldTarget(uint256.max)`; re-enabling is `setYieldTarget(<newValue>)`.
 
 ### Confirmed from §3.2 (Accounting & Technical Details)
@@ -763,8 +797,18 @@ This section consolidates the requirements that the lower phases (5+ in the renu
 
 The following Phase 3 surfaces have Phase-4 extension points:
 
-- **Withdraw wizard** — the externally-financed execution path (via Position Closer Contract) attaches as a second branch in Step 2's multicall composition. The wizard's slider-and-preview UI is stable; only the execution mechanism extends.
-- **Automation tab** — a new owner-side block exposes the Position Closer Contract as the externally-financed counterpart to the self-funded Withdraw wizard. Keeper notification or registration mechanics, if any, also attach here.
+- **Withdraw wizard, flashloan mode.** The UI surface is fully
+  specified in Phase 3 (toggle, status presentation, slider behaviour,
+  preview-data shape). The execution mechanism — Position Closer
+  Contract that wraps the vault interaction in a flash-loan callback,
+  flash-loan-provider selection, callback wiring, Underwater-escape
+  integration — is specified in Phase 4. The flash-loan-fee estimate
+  shown in the wizard's flashloan-mode preview also depends on
+  Phase-4 inputs.
+- **Automation tab.** A new owner-side block exposes the Position
+  Closer Contract as the externally-financed counterpart to the
+  self-funded Withdraw wizard. Keeper notification or registration
+  mechanics, if any, also attach here.
 
 ### TBD
 
