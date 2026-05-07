@@ -783,7 +783,7 @@ This section consolidates the requirements that the lower phases (5+ in the renu
 
 - **Overview composition.** No new endpoints; the Overview tab composes from data already exposed for §3.1 (card metrics, vault state) and shares the range-visualisation component with the NFT pattern. A thin `useUniswapV3StakingVaultPositionOverview` aggregation hook is recommended for the page-level data fetch but is largely a composition over existing hooks.
 - **Automation tab data hook.** A `useUniswapV3StakingVaultPositionAutomation` hook providing the three indicators (Automation Status, Settlement Availability, Lifetime Bounty Paid), the live settlement preview (composing `state.swapQuote` and `state.settleQuote`), and the keeper activity log (filtered list of `STAKING_DISPOSE` events with `config.disposalKind ∈ {keeper-swap, keeper-settle}`).
-- **`state.lifetimeBountyPaid` aggregation.** A consumer subscribing to `STAKING_DISPOSE` events and incrementing the field on every `disposalKind == 'keeper-settle'` occurrence. Quote-valued at `P_settle` of each event.
+- **`state.lifetimeBountyPaid` aggregation.** A consumer subscribing to `STAKING_DISPOSE` events and incrementing the field on every `disposalKind == 'keeper-settle'` occurrence by `surplusForwardedBase × P_settle + surplusForwardedQuote`. The two `surplusForwarded*` fields are populated by the indexer at event ingestion (per [position-concept.md §2.3](./position-concept.md#staking_dispose)) by correlating `ExecuteSettleInitiated.baseSurplus`/`quoteSurplus` with the matching `Settle` event's reward-buffer increment, factoring in the position's `T_at_call`. No Closer-Contract event source is required — the source is fully on-chain via vault events.
 
 ### Confirmed from §3.3 (Create Wizard extension)
 

@@ -113,13 +113,14 @@ readers who put SPEC and this document side by side.
 **Subclass-specific transient states.** The base contract exposes
 only the three persistent states above. Subclasses with callback-based
 permissionless paths add transient states that exist only inside a
-single transaction's execution frame. `KeeperStakingVault` adds
-`ExecuteSwapInProgress` (RFC-0003 §10), set during the keeper-supplied
-callback frame and reverted on successful return. These transient
-states are never observable as the persistent state between
-transactions and are not part of the user-facing lifecycle. They
-belong to the contract's implementation, not to the position's
-semantics.
+single transaction's execution frame. `KeeperStakingVault` adds two:
+`ExecuteSwapInProgress` (during the `executeSwap` callback frame) and
+`ExecuteSettleInProgress` (during the `executeSettle` callback frame),
+both per RFC-0003 §10. Both are set when entering the callback frame
+and revert to `Settled` on successful return. These transient states
+are never observable as the persistent state between transactions and
+are not part of the user-facing lifecycle. They belong to the
+contract's implementation, not to the position's semantics.
 
 ### Transitions
 
@@ -137,8 +138,8 @@ subclasses (`KeeperStakingVault` for now; `CowStakingVault` deferred).
 | `Staking` | `Staking` | `unstake()` / `claimRewards()` | owner | all | self-loop |
 | `Staking` | `Settled` | `swap(liquidity)` (full close) | owner | all | no |
 | `Staking` | `Settled` | `settle(liquidity)` (full close, Case 1) | owner | all | no |
-| `Staking` | `Settled` | `executeSwap()` (Cases 2/3, full only) | permissionless | Keeper | no |
-| `Staking` | `Settled` | `executeSettle(recipient)` (Case 1, full only) | permissionless | Keeper | no |
+| `Staking` | `Settled` | `executeSwap(callback)` (Cases 2/3, full only) | permissionless | Keeper | no |
+| `Staking` | `Settled` | `executeSettle(callback)` (Case 1, full only) | permissionless | Keeper | no |
 | `Settled` | `Settled` | `unstake()` / `claimRewards()` | owner | all | self-loop |
 
 `multicall()` is not a transition in its own right; it composes the
@@ -296,26 +297,42 @@ subclass-specific and always full-close.
 
 **Permissionless, `KeeperStakingVault` only:**
 
-- **`executeSwap(...)` for Cases 2/3, full close.** A keeper provides
-  a callback contract; the vault closes the entire position, pushes
-  the surplus token to the callback, and expects at least
-  `amountInMin` of the deficit token returned within the same call
-  frame. Keepers typically wrap `executeSwap` in a flash-loan
-  callback (UV3 pool, Aave, Balancer) to source the deficit token
-  without pre-funded inventory. Their profit comes from the spread
-  between the LVR-implied rate offered by the vault and external
-  markets — _not_ from the vault's reward buffer.
-- **`executeSettle(recipient, ...)` for Case 1, full close.** A
+- **`executeSwap(callback, ...)` for Cases 2/3, full close.** A
+  keeper provides a callback contract; the vault closes the entire
+  position, pushes the surplus token to the callback, and expects at
+  least `amountInMin` of the deficit token returned within the same
+  call frame. Keepers typically use the surplus tokens to source the
+  deficit externally (sell on AMMs, fund the deficit return), keeping
+  the spread between the LVR-implied rate and external markets as
+  profit. Their profit comes from the spread — _not_ from the vault's
+  reward buffer. Callback overpayment (returning more than
+  `amountInMin`) flows into the reward buffer for the owner.
+- **`executeSettle(callback, ...)` for Case 1, full close.** A
   permissionless caller triggers settlement when both surpluses are
-  present. The vault fills the unstake buffer with `(B, Q)` and the
-  reward buffer with `T` (the yield-target portion). The remaining
-  surplus over `(B, Q + T)` is transferred to `recipient` as a
-  bounty. The bounty compensates gas and incentivises permissionless
-  Case-1 settlement so the owner's yield target is realised without
-  owner action. In practice the bounty is small: Case 1 only arises
-  when fees push both `b` past `B` and `q` past `Q + T`
-  simultaneously, and an `executeSwap` keeper would typically settle
-  the position earlier in Case 2 or 3.
+  present, providing a callback contract. The vault locks the floor
+  `(B, Q + T)` into buffers (`B` and `Q` to the unstake buffer, `T`
+  to the reward buffer), pushes the surplus over the floor (`b - B`
+  base and `q - (Q + T)` quote) to the callback, and credits whatever
+  the callback returns to the reward buffer via balance-delta
+  accounting. The callback retains whatever it doesn't return —
+  typically routed to a caller-chosen recipient (a keeper bot's own
+  EOA, a Position Closer Contract's bounty-and-fee distribution to
+  treasury and operator, etc.). The vault is agnostic to how the
+  callback distributes the pushed surplus.
+
+  This is structurally symmetric to `executeSwap`: both push surplus
+  to the callback, both credit returns to the reward buffer via
+  balance-delta. The asymmetry is parametric — `executeSwap` pushes
+  one token (the surplus side) and demands at least `amountInMin` of
+  the deficit token returned; `executeSettle` pushes both surpluses
+  and demands no minimum return (the floor is already in buffers, so
+  the floor is structurally inviolable regardless of callback
+  behaviour).
+
+  In practice the surplus over `(B, Q + T)` in Case 1 is small. Case
+  1 only arises when fees push both `b` past `B` and `q` past
+  `Q + T` simultaneously, and an `executeSwap` keeper would typically
+  settle the position earlier in Case 2 or 3.
 
 ### Surplus allocation across paths
 
@@ -328,18 +345,26 @@ on the path:
 | `swap()` (Cases 2/3) | all | owner reward buffer |
 | `settle()` (Case 1) | all | owner reward buffer |
 | `executeSwap()` (Cases 2/3) | Keeper | owner reward buffer (callback overpayment included) |
-| `executeSettle()` (Case 1) | Keeper | caller-supplied `recipient` as bounty |
+| `executeSettle()` (Case 1) | Keeper | caller-supplied callback, which decides what returns to owner reward buffer (via balance-delta crediting on callback return) vs. what is retained externally |
 
 Two important consequences:
 
 - The owner who runs a `ManualStakingVault` keeps every wei the
   vault accumulates. There is no third-party leak.
-- The owner who runs a `KeeperStakingVault` only loses the Case-1
-  surplus (via `executeSettle`); in Cases 2/3 the keeper's profit
-  is external to the vault, not extracted from it. The choice
-  between Manual and Keeper is therefore not "do I sacrifice yield
-  for automation?" — it is "do I sacrifice the rare Case-1 surplus
-  for guaranteed Case-1 settlement without owner action?"
+- The owner who runs a `KeeperStakingVault` may lose part of the
+  Case-1 surplus (via the `executeSettle` callback) and the LVR
+  spread in Cases 2/3 (via `executeSwap`'s external arbitrage). The
+  exact split between owner-retained and externally-retained surplus
+  depends on which callback contract the keeper uses: a naive keeper
+  bot retains everything externally; an owner-affiliated Closer
+  Contract can return everything to the reward buffer; a
+  treasury-fee-charging Closer can split the surplus between
+  recipient and reward buffer per its own policy. The vault itself
+  is agnostic to this routing. The choice between Manual and Keeper
+  is therefore not "do I sacrifice yield for automation?" — it is
+  "do I accept the surplus distribution policy of the keepers and
+  Closer Contracts I expect to act on this vault, in exchange for
+  permissionless settlement when conditions allow it?"
 
 ### What is emergent (not invariant)
 
@@ -433,7 +458,7 @@ costBasis`, not a stored cumulative.
 | `realizedCashflow` | n/a — no periodic income stream in the vault model | — | `0` | constant |
 | `unrealizedPnl` | Standard derived value `currentValue − costBasis` | Computed | Quote bigint | Live (derived) |
 | `unrealizedCashflow` | n/a | — | `0` | constant |
-| `collectedYield` | Cumulative quote value of yield recognised at the disposal that filled the reward buffer; valued at `P_settle`. **Owner-realised** yield: excludes capital-cycling on `owner-swap` and the bounty-payout on `keeper-settle` (see §2.3). | Ledger-cumulative; written on `STAKING_DISPOSE` (the reward-fill component) | Quote bigint | Ledger-derived |
+| `collectedYield` | Cumulative quote value of yield recognised at the disposal that filled the reward buffer; valued at `P_settle`. **Owner-realised** yield: excludes capital-cycling on `owner-swap` and the externally-retained surplus on `keeper-settle` (see §2.3). | Ledger-cumulative; written on `STAKING_DISPOSE` (the reward-fill component) | Quote bigint | Ledger-derived |
 | `unclaimedYield` | Quote-valued contents of the reward buffer (UV3 fees + LVR substance + allocated `T` share) | `vault.rewardBufferBase × P_pool + vault.rewardBufferQuote` | Quote bigint | Live |
 | `lastYieldClaimedAt` | Timestamp of the most recent `STAKING_CLAIM_REWARDS` event | Ledger | Date | Ledger-derived |
 | `baseApr` | Time-weighted APR computed from `collectedYield` over weighted average `costBasis`, bracketed on `STAKING_DEPOSIT` and `STAKING_DISPOSE` events | `PositionAprPeriod` aggregation | Float, basis-point precision | Aggregated from ledger periods |
@@ -485,7 +510,7 @@ The `state` JSON shape under `@midcurve/shared/src/types/position/uniswapv3-stak
 | Field | Type | Source | UI consumer |
 |---|---|---|---|
 | `kindLabel` | `'manual-staking-vault-v1' \| 'keeper-staking-vault-v1' \| 'cow-staking-vault-v1'` | `vault.kindLabel()` once at import (immutable post-deploy) | Subclass badge in card header; gates Keeper-specific UI elements (e.g., bounty history, `executeSettle` status panels) |
-| `vaultState` | `'Empty' \| 'Staking' \| 'Settled'` | `vault.state()`, mapped (on-chain `Staked → Staking`; subclass transient states like `ExecuteSwapInProgress` are never observed between transactions) | Lifecycle badge in card header |
+| `vaultState` | `'Empty' \| 'Staking' \| 'Settled'` | `vault.state()`, mapped (on-chain `Staked → Staking`; subclass transient states `ExecuteSwapInProgress` and `ExecuteSettleInProgress` are never observed between transactions) | Lifecycle badge in card header |
 | `swapStatus` | `'NotApplicable' \| 'NoSwapNeeded' \| 'Executable' \| 'Underwater'` | derived from current `(b, q)` projection vs. `(B × frac, (Q + T) × frac)` per RFC-0003 §4 case classification: Case 1 → `NoSwapNeeded`, Cases 2/3 → `Executable`, Case 4 → `Underwater`; `NotApplicable` when `vaultState != Staking` | Health indicator badge (Underwater); gates settlement action buttons (`NoSwapNeeded` → Settle button, `Executable` → Swap button, `Underwater` → both disabled, prompts the user to lower `T`) |
 | `swapQuote` | `{ tokenIn, minAmountIn, tokenOut, amountOut, liquidity } \| null` | `vault.quoteSwap(currentLiquidity)`; `null` if `swapStatus ∉ {Executable}` | Swap tab in detail page; informs the close-position formular |
 | `settleQuote` | `{ unstakeBase, unstakeQuote, rewardBase, rewardQuote, liquidity } \| null` | `vault.quoteSettle(currentLiquidity)`; `null` if `swapStatus != NoSwapNeeded` | Settle tab in detail page; shows the buffers a full settle would fill |
@@ -498,7 +523,7 @@ The `state` JSON shape under `@midcurve/shared/src/types/position/uniswapv3-stak
 | `sqrtPriceX96` | `bigint` | `pool.slot0().sqrtPriceX96` | Pool price display; input for `currentValue` and `swapStatus` |
 | `currentTick` | `number` | `pool.slot0().tick` | In-range / out-of-range computation |
 | `poolLiquidity` | `bigint` | `pool.liquidity()` | Optional comparison display (own position vs. pool TVL) |
-| `lifetimeBountyPaid` | `bigint` (quote-valued) | sum of `bountyValue` across all `STAKING_DISPOSE` events with `disposalKind == 'keeper-settle'` | "Bounty paid to keepers" display in the Keeper-vault history tab; `0` for Manual vaults |
+| `lifetimeBountyPaid` | `bigint` (quote-valued) | derived per `STAKING_DISPOSE` event with `disposalKind == 'keeper-settle'` as `surplusForwardedBase × P_settle + surplusForwardedQuote` (where the two `surplusForwarded*` config fields are populated by the indexer per §2.3 from `ExecuteSettleInitiated` and `Settle` event data, factoring in `T_at_call`); cumulative across all such events | "Bounty paid to keepers" display in the Keeper-vault history tab; `0` for Manual vaults |
 
 **Rationale for the changes from the SPEC-0003a draft:**
 
@@ -539,14 +564,27 @@ The `state` JSON shape under `@midcurve/shared/src/types/position/uniswapv3-stak
 
 - **`lifetimeBountyPaid` is new and Keeper-specific.** Only
   meaningful for `kindLabel == 'keeper-staking-vault-v1'`. It tracks
-  the cumulative quote-value of bounty surrendered via
-  `executeSettle` Case-1 calls, valued at `P_settle` of each event.
+  the cumulative quote-value of surplus that the `executeSettle`
+  callback retained externally (i.e., did not return to the vault's
+  reward buffer), valued at `P_settle` of each event. With the
+  symmetric callback design, this value is fully derivable from the
+  pair of vault events emitted at each `executeSettle` call —
+  `ExecuteSettleInitiated.baseSurplus`/`quoteSurplus` (the gross
+  pushed) minus the corresponding `Settle` event's reward-buffer
+  increment (correcting for the locked-in `T_at_call` portion; see
+  §2.3 for the derivation formula). No Closer-Contract event surface
+  is required.
+
   This is **not** PnL — the owner's `realizedPnl` and
-  `collectedYield` are unaffected by the bounty (the owner-side
-  floor `(B, Q + T)` is preserved). It is metadata, useful for the
-  user's introspection into "what did I trade away for the
+  `collectedYield` are unaffected by the surplus retention (the
+  owner-side floor `(B, Q + T)` is preserved structurally before
+  any callback runs). It is metadata, useful for the user's
+  introspection into "what did I trade away for the
   permissionless-Case-1 guarantee?". The field is `0` for Manual
-  vaults and stays `0` over keeper-swap and owner-side paths.
+  vaults, stays `0` over keeper-swap and owner-side paths, and
+  stays `0` for keeper-settle calls where the callback returns the
+  entire pushed surplus to the vault (e.g., owner-affiliated Closer
+  Contracts).
 
 **Stale-quote handling.** `swapQuote` and `settleQuote` change
 block-by-block as `sqrtPriceX96` moves and as fees accrue. The cached
@@ -661,9 +699,18 @@ needed in the config payload.
   - `tokenIn: address` (the deficit token the counterparty supplied)
   - `amountIn: bigint` (the amount supplied)
 - `'keeper-settle'` (Case 1 only):
-  - `bountyRecipient: address`
-  - `bountyBase: bigint` (the surplus base routed direct to recipient)
-  - `bountyQuote: bigint` (the surplus quote routed direct to recipient)
+  - `surplusForwardedBase: bigint` (= `ExecuteSettleInitiated.baseSurplus - rewardFillBase`; the portion of the gross base surplus the callback retained externally instead of returning it to the vault)
+  - `surplusForwardedQuote: bigint` (= `ExecuteSettleInitiated.quoteSurplus - (rewardFillQuote - T_at_call)`; the portion of the gross quote surplus the callback retained externally; `T_at_call` is the position's `yieldTarget` slot value at the moment of disposal, tracked by the indexer)
+
+  Note: there is no `callbackTarget` or `recipient` field in the
+  config. The vault sees `callbackTarget` once at `executeSettle`
+  entry but doesn't preserve it as semantic data — what the callback
+  ultimately does with the externally-retained surplus (route to a
+  treasury, an owner-affiliated address, a third-party keeper) is
+  not visible to the vault. If integration with a specific Closer
+  Contract is desired, the Closer should emit its own events that an
+  additional indexer can correlate with the vault's `STAKING_DISPOSE`
+  event by tx hash.
 
 **Framework deltas (uniform across disposalKinds):**
 
@@ -674,7 +721,7 @@ needed in the config payload.
 | `deltaCollectedYield` | see kind-specific table below |
 | `deltaRealizedCashflow` | `0` |
 | `deltaLiquidity` | `−liquidityClosed` |
-| `tokenValue` | `0` (no movement to owner; tokens move into buffers or to bounty recipient) |
+| `tokenValue` | `0` (no movement to owner; tokens move into buffers or to the executeSettle callback) |
 | `rewards` | `[]` |
 
 **`deltaCollectedYield` per disposalKind:**
@@ -684,13 +731,17 @@ needed in the config payload.
 | `owner-swap` | `(rewardFillBase × P_settle + rewardFillQuote) − amountInValue` | The owner provides `amountIn` from their own wallet; that capital cycles back to them via `claimRewards` and is **not yield**. Subtract it from the buffer fill to recognise only pool-intrinsic yield. `amountInValue = amountIn` if `tokenIn == quoteToken`, else `amountIn × P_settle`. |
 | `owner-settle` | `rewardFillBase × P_settle + rewardFillQuote` | Case 1: no counterparty trade, `amountIn = 0`, the entire reward fill is pool-intrinsic yield. |
 | `keeper-swap` | `rewardFillBase × P_settle + rewardFillQuote` | The keeper's `amountIn` is sourced from external markets via their callback; it represents LVR substance flowing into the vault. Counts entirely as yield. (Pending verification against SPEC-0003c's exact callback semantics — see §2.5.) |
-| `keeper-settle` | `rewardFillBase × P_settle + rewardFillQuote` (= `T` × `P_settle`-quote-conversion, since the buffer fills with exactly `(0, T)` per RFC-0003 §9) | The bounty `(bountyBase, bountyQuote)` flows direct to recipient and never enters the vault buffers; only the `T`-portion enters reward buffer and is recognised as yield. |
+| `keeper-settle` | `rewardFillBase × P_settle + rewardFillQuote` | The callback may return any non-negative amounts of base and quote to the vault (including zero, the full pushed surplus, or anything in between including overpayment). Whatever returns lands in the reward buffer alongside the locked-in `T` portion (which is preserved before the callback runs). All reward-buffer increment counts as owner-realised yield. The portion of the surplus the callback retained externally (= `surplusForwardedBase`, `surplusForwardedQuote`) does not enter the reward buffer and is not yield from the owner's perspective. In the boundary case where the callback returns nothing, `rewardFillBase = 0` and `rewardFillQuote = T`, simplifying to `T × P_settle`-conversion. |
 
-Note that for `keeper-settle`, `rewardFillBase = 0` and
-`rewardFillQuote = T × frac` (full close: `frac = 1`), so the
-formula simplifies to `T` (in quote units). The bounty's quote-value
-is recorded separately in `config.bountyBase`/`bountyQuote` and
-aggregated into `state.lifetimeBountyPaid` for transparency, but it
+Note that for `keeper-settle` in the boundary case where the callback
+returns nothing, `rewardFillBase = 0` and `rewardFillQuote = T × frac`
+(full close: `frac = 1`), so the formula simplifies to `T` (in quote
+units). When the callback returns part or all of the pushed surplus,
+`rewardFillBase` and `rewardFillQuote` capture both the locked-in `T`
+portion and the returned surplus; the formula recognises all of it as
+owner yield. The portion the callback retained externally is recorded
+separately in `config.surplusForwardedBase`/`surplusForwardedQuote`
+and aggregated into `state.lifetimeBountyPaid` for transparency, but
 does not enter `realizedPnl` or `collectedYield`.
 
 #### `STAKING_UNSTAKE`
@@ -852,15 +903,19 @@ yield and is already inside `realizedYield = rewardFillValue`.)
 
 **`disposalKind == 'keeper-settle'`: no addendum to the journal.**
 
-The bounty `(bountyBase, bountyQuote)` flows direct from the vault
-to a non-owner recipient and never enters Position Cash Holdings,
-Pending Settlement, or Realized Yield. From the owner's accounting
-perspective, the bounty is invisible. The base entry, with
-`rewardFillValue == T` and `realizedYield == T`, is correct as-is.
+The portion of the surplus the callback retained externally
+(`surplusForwardedBase`, `surplusForwardedQuote`) flows from the
+vault directly to whichever address the callback routed to, never
+entering Position Cash Holdings, Pending Settlement, or Realized
+Yield. From the owner's accounting perspective, this externally-
+retained surplus is invisible. The portion the callback returned to
+the vault (plus the locked-in `T`) lands in the reward buffer and
+is captured in the base entry's `rewardFillValue` and `realizedYield`
+correctly.
 
-The bounty is tracked in the position's `state.lifetimeBountyPaid`
-metadata (per §2.2) for user introspection but does not produce any
-journal lines in the owner's ledger.
+The externally-retained surplus is tracked in the position's
+`state.lifetimeBountyPaid` metadata (per §2.2) for user introspection
+but does not produce any journal lines in the owner's ledger.
 
 #### `STAKING_UNSTAKE` (drained value `V`)
 
