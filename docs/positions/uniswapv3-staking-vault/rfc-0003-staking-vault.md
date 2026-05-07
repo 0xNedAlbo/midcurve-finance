@@ -2,26 +2,36 @@
 
 **Status:** Draft (rewrite)
 **Issue:** TBD
-**Implementation:** SPEC-0003b
+**Implementation:** SPEC-0003b (abstract base + ManualStakingVault), SPEC-0003c (KeeperStakingVault)
 **Author:** @0xNedAlbo
-**Last updated:** 2026-05-06
+**Last updated:** 2026-05-07
 
 ---
 
 ## 1. Summary
 
-The Staking Vault wraps a single Uniswap V3 NFT position and turns it into
-a yield-target-based staking primitive. The owner deposits a position with
-a fixed quote-side reward target `T`. The vault closes the position
-(fully or partially) when the on-chain conditions allow it to honor the
-deposit `(B, Q)` plus the target `T`, paying the owner exactly that and
-distributing any surplus along well-defined paths.
+The Staking Vault wraps a single Uniswap V3 NFT position and turns it
+into a yield-target-based staking primitive. The owner deposits a
+position with a fixed quote-side reward target `T`. The vault closes the
+position (fully or partially) when the on-chain conditions allow it to
+honor the deposit `(B, Q)` plus the target `T`, paying the owner exactly
+that and distributing any surplus along well-defined paths.
 
-Settlement is permissionless. External actors — keepers, solvers, helper
-bots — drive the close in exchange for either an LVR-implied rate
-discount (when a token swap is needed) or an explicit bounty (when no
-swap is needed). The owner has additional owner-only paths for direct
-trades and for capital-light exits via flash callback.
+The vault is structured as an **abstract base contract** plus
+**concrete subclasses** that select a settlement strategy. The base
+contract — `AbstractStakingVault` — defines the deposit, the yield
+target, the four-case classification, and all owner-only paths
+(`stake`, `increaseStake`, `setYieldTarget`, `swap`, `settle`,
+`unstake`, `claimRewards`). It guarantees the owner-side floor: after
+any successful settlement, the owner can recover at least `(B, Q + T)`.
+
+Subclasses extend the base with permissionless settlement strategies:
+- `ManualStakingVault` — no automation, owner is the sole settlement
+  actor.
+- `KeeperStakingVault` — keepers drive settlement via a callback-based
+  trade (`executeSwap`) or a direct surplus bounty (`executeSettle`).
+- `CowStakingVault` — deferred. Future subclass that integrates with
+  CoW Protocol's solver network via ERC-1271.
 
 The vault uses no oracle. All pricing is deterministic from the pool
 state at execution time, classified by a four-case partition over the
@@ -31,27 +41,37 @@ state at execution time, classified by a four-case partition over the
 
 A Uniswap V3 LP position is a complex, two-sided exposure with no
 intrinsic exit signal. The provider holds two tokens that drift relative
-to spot, accumulates fees, and must decide manually when to close — which
-typically means writing a bot, paying for an aggregator, or eyeballing
-the position in a UI.
+to spot, accumulates fees, and must decide manually when to close —
+which typically means writing a bot, paying for an aggregator, or
+eyeballing the position in a UI.
 
-This RFC turns the position into a position that **closes itself when
-the right economic conditions are met**, without requiring the owner to
-run infrastructure. The mechanism that makes this possible is a vault
-contract that:
+This RFC turns the position into a primitive that **defines an exit
+target as a contract** and **lets a settlement strategy realize it**.
+Two ideas pulled apart:
 
-- Holds the NFT and the deposit accounting `(B, Q, T)`
-- Exposes a permissionless close path that settles when on-chain state
-  shows the deposit-plus-target is recoverable
-- Compensates external actors via implicit (LVR rate) or explicit
-  (bounty) rewards, so a third-party keeper has positive expected value
-  for closing
-- Falls back to owner-controlled paths (direct trade, flash exit) when
-  external action does not materialize or the owner wants to override
+1. **What the protocol guarantees to the position owner.** The deposit
+   `(B, Q)` plus the yield target `T` form a settlement contract: when
+   the position is closed via any path, the owner receives at least
+   `(B, Q + T)`. This guarantee is identical across all settlement
+   strategies and lives in the abstract base contract.
+
+2. **How settlement is automated.** The base contract gives the owner
+   manual paths to settle. Concrete subclasses add permissionless
+   automation: keepers, solvers, helper bots — each with its own
+   incentive structure and trust assumptions. A user picks a subclass
+   matching their preferred automation level.
+
+This separation matters because the right automation strategy depends
+on context: a small position may not be worth running keeper
+infrastructure for and is better served by manual close; a large
+position benefits from permissionless keeper-driven close so the owner
+can be offline; a sophisticated owner may want CoW Protocol routing for
+better execution. The same `(B, Q, T)` contract works underneath all
+three.
 
 The economic primitive being expressed is: **"I want exactly `B` base
-plus `Q + T` quote out of this position. Close it as soon as the pool
-allows. If it cannot be closed at this target, leave it staked."**
+plus `Q + T` quote out of this position. Define the close conditions
+mathematically, then apply whatever settlement strategy fits."**
 
 ## 3. Concepts and notation
 
@@ -71,10 +91,15 @@ At `stake()`, the vault records the deposit `(B, Q)` from the actual
 token amounts consumed by the NFPM mint (after slippage refunds). The
 yield target `T` is set by the owner and is mutable while staked.
 
-`(B, Q, T)` together form the *settlement contract* the vault makes with
-the owner: on full settlement, the owner receives at least `(B, Q + T)`,
-distributed across `unstakeBuffer` (B and Q) and `rewardBuffer` (T plus
-any surplus).
+`(B, Q, T)` together form the *settlement contract* the vault makes
+with the owner: on full settlement, the owner receives at least
+`(B, Q + T)`, distributed across the unstake buffer (B and Q) and the
+reward buffer (T plus any surplus).
+
+This guarantee — the **owner-side floor** — is the single most
+important invariant of the vault, and it MUST hold across all
+settlement paths in all concrete subclasses. See §7 for the contract
+that subclasses MUST honor.
 
 ### 3.3 Position close and balance after close
 
@@ -85,8 +110,9 @@ all-or-nothing per `tokenId`). The resulting fresh balance the vault
 receives is denoted `(b, q)`.
 
 This is the central observable: `(b, q)` is what the position can
-deliver right now, and the four-case classification compares it to the
-targets `(B × frac, (Q + T) × frac)` where `frac` is the close fraction.
+deliver right now. The four-case classification compares it to the
+targets `(B × frac, (Q + T) × frac)` where `frac` is the close
+fraction.
 
 ### 3.4 LVR-implied rate
 
@@ -94,14 +120,14 @@ LVR ("loss versus rebalancing") is the structural feature of UV3
 positions where the average price the position trades at across its
 range is below the current spot price. The vault exposes this rate
 mechanically: in Cases 2 and 3 below, the vault offers a swap at the
-exact `(b, q)`-derived rate from the partial close, which is by
-construction the LVR-implied rate. The keeper accepts that rate (or
-declines).
+exact `(b, q)`-derived rate from the position close. By construction
+this is the LVR-implied rate. The counterparty (owner in `swap()`,
+keeper in `executeSwap()`) accepts that rate or declines.
 
 The vault never quotes "spot minus X%". It quotes "this much in, this
 much out, take it or leave it." The fact that this rate corresponds to
-a discount versus current spot is not a parameter — it is the structural
-property of the close itself.
+a discount versus current spot is not a parameter — it is the
+structural property of the close itself.
 
 ## 4. The four cases
 
@@ -112,41 +138,52 @@ respectively. Compare against `(targetBase, targetQuote) = (B × frac,
 | Case | Condition | Status |
 |------|-----------|--------|
 | 1 | `b ≥ targetBase AND q ≥ targetQuote` | NoSwapNeeded |
-| 2 | `b > targetBase AND q < targetQuote` | Executable |
-| 3 | `b < targetBase AND q > targetQuote` | Executable |
+| 2 | `b ≥ targetBase AND q < targetQuote` | Executable |
+| 3 | `b < targetBase AND q ≥ targetQuote` | Executable |
 | 4 | `b < targetBase AND q < targetQuote` | Underwater |
 
 **Case 1 (NoSwapNeeded).** The vault holds enough of both tokens. No
-trade is needed; settlement is purely accounting. Surplus over
-`(B, Q + T)` is the *bounty* paid to the caller of the permissionless
-`settle()` path (see §5.3).
+trade is needed; settlement is purely accounting. The surplus over
+`(B × frac, (Q + T) × frac)` is routed differently depending on the
+caller:
+- Owner-side `settle()` (base contract): surplus flows into the reward
+  buffer; the owner claims it via `claimRewards()`.
+- Permissionless `executeSettle()` (keeper subclass): surplus flows to
+  the caller as a bounty, compensating gas and incentivizing
+  permissionless settlement.
+
+In both cases the owner-side floor `(B × frac, (Q + T) × frac)` is
+preserved.
 
 **Case 2 (Executable, base surplus).** Vault has too much base, not
-enough quote. It offers `(b − targetBase)` base to a keeper in exchange
-for at least `(targetQuote − q)` quote. The keeper sells the base on
-the market and keeps the LVR-implied rate as profit.
+enough quote. The vault offers `(b − targetBase)` base in exchange for
+at least `(targetQuote − q)` quote. The counterparty who provides the
+quote sells the base on external markets and keeps the LVR-implied rate
+as profit.
 
 **Case 3 (Executable, quote surplus).** Symmetric to Case 2: vault has
 too much quote, offers it for base.
 
-**Case 4 (Underwater).** The position cannot deliver `(B, Q + T)` at the
-current price. This is **only reachable when `T > 0`**. Mathematically,
-a UV3 position close always yields either `(b ≥ B AND q ≤ Q)` or
-`(b ≤ B AND q ≥ Q)` plus non-negative fees on both sides. So `b < B`
-implies `q ≥ Q`, and Case 4's `q < Q + T` requires `T > fees_quote`.
+**Case 4 (Underwater).** The position cannot deliver `(B × frac,
+(Q + T) × frac)` at the current price. This is **only reachable when
+`T > 0`**. Mathematically, a UV3 position close always yields either
+`(b ≥ B AND q ≤ Q)` or `(b ≤ B AND q ≥ Q)` plus non-negative fees on
+both sides. So `b < B` implies `q ≥ Q`, and Case 4's `q < Q + T`
+requires `T > fees_quote`.
 
-This means Underwater is always a yield-target phenomenon, never a pool
+Underwater is therefore always a yield-target phenomenon, never a pool
 phenomenon. The owner controls whether the position is in Case 4: if
-`setYieldTarget(0)` is called, the vault transitions to Case 2 or 3 and
-becomes Executable. The owner trades reward expectation for exit
-optionality.
+`setYieldTarget(0)` is called, the vault transitions to Case 1, 2, or
+3 and becomes settle-able. The owner trades reward expectation for
+exit optionality.
 
 ### 4.1 Boundary handling
 
-Comparisons use `≥` consistently. Boundary equalities (`b == B`, `q ==
-Q+T`) fall into Case 1. Degenerate sub-amounts (`amountIn == 0` or
-`amountOut == 0` in Cases 2/3) are handled by the standard token-flow
-path with zero transfers — they do not constitute special cases.
+Comparisons use `≥` consistently. Boundary equalities (`b == B`,
+`q == Q + T`) fall into Case 1. Degenerate sub-amounts (`amountIn ==
+0` or `amountOut == 0` in Cases 2/3) are handled by the standard
+token-flow path with zero transfers — they do not constitute special
+cases.
 
 ### 4.2 Why no fifth case
 
@@ -157,170 +194,350 @@ keeper). It was rejected because:
 1. It required a TWAP oracle, contradicting the no-oracle goal.
 2. It introduced an arbitrary 5% discount parameter.
 3. The case it addressed — both surpluses — is now handled cleanly by
-   `settle()` with surplus-as-bounty, no oracle needed.
+   the surplus-routing logic in Case 1, no oracle needed.
 
 The four-case partition is final.
 
-## 5. Settlement paths
+## 5. Architecture: abstract base + concrete subclasses
 
-The vault exposes four mutually exclusive settlement paths, each
-matching exactly one role × case combination.
+The vault is split into an abstract base contract and concrete
+subclasses. The split exists because the owner-side contract (what the
+protocol guarantees) is invariant across automation strategies, while
+the strategy itself (how settlement happens permissionlessly) varies
+substantially — and forcing one strategy on every deployment loses
+flexibility while gaining no safety.
 
-| Function | Caller | Cases | Close size | Token flow |
-|----------|--------|-------|------------|------------|
-| `swap` | Owner | 2, 3 | partial or full | atomic in/out |
-| `flashSwap` | Public | 2, 3 | full | callback push/pull |
-| `settle` | Public | 1 | full | bounty push to recipient |
-| `flashSettle` | Owner | 1, 2, 3, 4 | partial or full | callback push/pull |
+### 5.1 What lives in the base
 
-### 5.1 `swap()` — owner trade
+`AbstractStakingVault` defines:
 
-The owner trades against the vault at the LVR-implied rate. The owner
-specifies the close size as a `liquidity` parameter (an explicit number
-of NFPM liquidity units), and the vault dictates the resulting
-`(amountIn, amountOut)` from the post-close state.
+- All storage (deposit accounting, buffers, state slot, position
+  parameters).
+- All owner-only entry points: `stake`, `increaseStake`,
+  `setYieldTarget`, `swap`, `settle`, `unstake`, `claimRewards`.
+- The four-case classification math (§4).
+- All views: `quoteSwap`, `quoteSettle`, `positionLiquidity`,
+  `baseToken`, `quoteToken`.
+- Internal helpers: position close, buffer fill, expected-freed
+  computation, pool resolution.
+- The state machine: `Empty`, `Staked`, `Settled`.
+- One lifecycle hook: `_afterStake(tokenId, liquidityDelta)`, called
+  after a successful initial stake or incremental stake. Default
+  implementation is empty.
+- One abstract function: `kindLabel()`, which any concrete subclass
+  MUST implement to return its unique stable identity.
 
-Slippage bounds (`amountInMax`, `amountOutMin`) protect against pool
-drift between off-chain quote and on-chain execution. The owner pays
-`amountIn` of `tokenIn`; the recipient receives `amountOut` of
-`tokenOut`. Reverts in Case 1 (use `settle`) and Case 4 (reduce T or
-use `flashSettle`).
+The base contract is `abstract` and cannot be deployed directly. The
+abstract `kindLabel()` enforces this at compile time.
 
-This is the "I want to close manually and trade against my own vault"
-path. It is partial-capable because the owner is in control of close
-size and is aware of the implications.
+### 5.2 What subclasses add
 
-### 5.2 `flashSwap()` — keeper trade
+Concrete subclasses extend the base with permissionless settlement
+strategies. Each subclass:
 
-Permissionless. Always full close. The keeper provides a callback
-contract; the vault pushes `tokenOut` to the callback and expects
-`tokenIn ≥ amountInMin` returned. The frame is reentrancy-locked via
-the `FlashSwapInProgress` state.
+- Implements `kindLabel()` returning a unique identifier.
+- MAY override `_afterStake` to perform strategy-specific setup
+  (e.g., approval to a settlement infrastructure contract, or
+  registration of an order with an off-chain solver network).
+- MAY add new external functions, typically named `execute*` to
+  match the verb-based taxonomy where pure verbs (`swap`, `settle`)
+  are owner-side and `execute*` variants are permissionless.
+- MAY add new state values for transient locks during callback
+  frames, starting at `state = 3`. The base's `Empty/Staked/Settled`
+  values are reserved.
+- MAY add new storage slots, subject to the layout constraint that
+  subclass slots come strictly after base slots.
 
-This is the **primary keeper integration point**. A standalone keeper
-bot:
+Subclasses MUST NOT:
+- Break the owner-side floor `(B × frac, (Q + T) × frac)` defined
+  in §3.2.
+- Redirect surplus away from the owner in owner-side functions
+  (only permissionless paths may route surplus to a non-owner
+  recipient).
+- Override base owner functions in ways that change the buffer-fill
+  contract.
+- Modify base storage from within `_afterStake`.
 
-1. Polls `quoteSwap()` across vaults
-2. For Executable status, evaluates whether the LVR-implied rate is
-   profitable after gas and external swap costs
-3. Calls `flashSwap()` with a callback that takes a UV3-pool flash
-   loan, executes the trade, sells the result on AMM, repays
-4. Keeps the LVR-discount as profit
+These are SPEC-level constraints; they are not contract-enforced
+(beyond what Solidity's inheritance and visibility rules naturally
+provide). Per-subclass review and tests must validate them.
 
-Why always full? Yield-target preservation. Partial close shrinks `T`
-proportionally, leaving the remainder exposed to further drift. If
-keeper #1 closes 30%, keeper #2 may find a Case-4 position. The
-yield-target promise breaks. Owners reaching `q ≥ Q + T` want the full
-position closed atomically.
+### 5.3 Why this split
 
-### 5.3 `settle()` — Case 1 with bounty
+Three motivating observations:
 
-Permissionless. Always full close. Used when the position is in
-NoSwapNeeded — both surpluses present, no trade needed.
+**Observation 1: the owner contract is identical across strategies.**
+A keeper-automated vault and a manual vault are economically
+indistinguishable from the owner's perspective: same deposit, same
+target, same payout structure, same recovery semantics. The only
+difference is whether external actors can settle, and at what cost.
+Putting the owner contract in the base eliminates duplication and
+makes the cross-strategy invariant structurally obvious.
 
-Mechanics:
+**Observation 2: subclass selection is a meaningful UX choice.**
+Different users want different automation. A user with a small
+position who plans to monitor it manually wants the simplicity of
+`ManualStakingVault` — no callback complexity, no permissionless
+surface to reason about. A user with a large position who is offline
+most of the time wants `KeeperStakingVault` so external actors close
+the position when conditions allow. A user routing through CoW Swap
+wants `CowStakingVault` for solver-network execution. Forcing one
+strategy on all users would either over-complicate the simple case or
+under-serve the sophisticated case.
 
-- Position fully closed, vault holds `(b, q)` with `b ≥ B`, `q ≥ Q+T`
-- `unstakeBuffer` filled with exactly `(B, Q)`
-- `rewardBuffer` filled with exactly `(0, T)`
-- Surplus `(b − B, q − (Q+T))` transferred to caller's `recipient` as
-  bounty
+**Observation 3: future strategies should not require base changes.**
+CoW Protocol integration in particular requires non-trivial setup
+(VaultRelayer approvals, ConditionalOrder registration with
+ComposableCoW, ERC-1271 signature handling) that is out of scope for
+keeper-style automation. The subclass extension mechanism (`_afterStake`
+hook plus new external functions) is sized exactly for this kind of
+strategy without modifying or even redeploying the base.
 
-The bounty exists because Case 1 has no implicit keeper reward (no
-trade, no LVR discount). It compensates for gas and incentivizes
-permissionless settlement, so the owner's yield target is realized
+### 5.4 Subclass identity and the registry
+
+Each concrete subclass returns a unique stable `kindLabel()`. These
+labels serve as keys in the implementation registry (specified
+separately in `spec-0003d-vault-implementation-registry.md`), which
+the factory consults to deploy the right clone for the user's chosen
+kind.
+
+Currently defined kinds:
+
+| Subclass | `kindLabel()` returns |
+|---|---|
+| `ManualStakingVault` | `keccak256("manual-staking-vault-v1")` |
+| `KeeperStakingVault` | `keccak256("keeper-staking-vault-v1")` |
+| `CowStakingVault` (deferred) | `keccak256("cow-staking-vault-v1")` |
+
+Subclasses are parallel siblings of the base, not a chain. There is no
+`Manual → Keeper → Cow` inheritance.
+
+## 6. Owner-side contract (base)
+
+The base contract gives the owner a complete settlement toolkit even
+without any subclass automation. The owner can stake, adjust the yield
+target, harvest surplus partially, exit fully, and recover principal
+plus rewards. None of these paths require external actors.
+
+The verb-based taxonomy is consistent: pure verbs (`swap`, `settle`,
+`stake`, `unstake`, etc.) are owner-only. Subclass `execute*` variants
+are permissionless.
+
+### 6.1 Owner-side settlement
+
+**`swap(liquidity, ...)` — Cases 2/3.** The owner trades against the
+vault at the LVR-implied rate. Specifies the close size as a
+`liquidity` parameter (NFPM units). Vault dictates the resulting
+`(amountIn, amountOut)` from the post-close state. Slippage bounds
+(`amountInMax`, `amountOutMin`) protect against pool drift. Reverts in
+Case 1 (use `settle`) and Case 4 (reduce T).
+
+Partial-capable. The owner is in control of close size and aware of
+the implications.
+
+**`settle(liquidity, ...)` — Case 1.** Owner closes the position
+without trading because both surpluses are already present. Buffers
+fill with `(B × frac, Q × frac)` on the unstake side and the entire
+surplus over those amounts (including the yield target T and any
+fee-driven surplus) on the reward side. Reverts in Cases 2, 3 (use
+`swap`) and Case 4 (reduce T).
+
+Partial-capable. Use case: the owner wants to harvest accumulated
+surplus without fully exiting (e.g., position has been running well,
+fees push Q significantly above Q + T, owner takes part out and lets
+the rest run).
+
+### 6.2 Owner-side stake lifecycle
+
+**`stake(...)`** — initial mint of a new UV3 position into the vault.
+Records `(B, Q, T)` from the consumed amounts and the owner's chosen
+target.
+
+**`increaseStake(...)`** — adds liquidity to the existing position.
+The vault adds the consumed `(amount0, amount1)` to `(B, Q)`
+proportionally. The yield target `T` is scaled by the new-to-old quote
+ratio: `T_new = ceil(T_old × (Q + ΔQ) / Q)`. This keeps the implicit
+yield rate `T / Q` constant across stake increases.
+
+Skipped if `Q == 0` (no anchor to scale against). Renamed from earlier
+`stakeTopUp` for verb-taxonomy consistency.
+
+**`setYieldTarget(newT)`** — change `T` while staked. Three use cases:
+1. Lower T to escape Underwater (`setYieldTarget(0)` always makes the
+   position settle-able).
+2. Raise T to extend reward expectation, accepting longer position
+   lifetime.
+3. Adjust T to changed pool conditions (volume regime shifts, fee tier
+   reasoning) without forcing a close + re-stake.
+
+### 6.3 Owner-side recovery
+
+**`unstake()`** — drains the unstake buffer (principal recovered from
+settlement) to the owner. Callable in `Staked` (mid-lifecycle) and
+`Settled`.
+
+**`claimRewards()`** — drains the reward buffer (yield target plus
+surplus) to the owner. Callable in `Staked` and `Settled`.
+
+Both follow checks-effects-interactions: zero buffers, then transfer.
+
+### 6.4 The owner-side floor
+
+Across all owner-side paths in the base, the post-call invariant
+holds: the owner can drain at least `(B × frac, (Q + T) × frac)`
+through `unstake() + claimRewards()` for any settled fraction `frac`.
+The base internal helper `_settleBuffersAndStake` enforces this by
+construction: it credits exactly `(B × frac, Q × frac)` to the unstake
+buffer and the entire excess to the reward buffer.
+
+This is the floor that subclasses inherit and MUST NOT break. See §7.
+
+## 7. Subclass extension contract
+
+This section is normative for any subclass implementer.
+
+### 7.1 What subclasses MAY add
+
+- New external functions, typically `execute*` for permissionless
+  variants of `swap` and `settle`, or strategy-specific configuration
+  setters.
+- New events.
+- New storage slots, appended after base slots in declaration order.
+- New `state` values starting at 3 for transient locks during callback
+  frames.
+- New errors with non-colliding selectors.
+- An override of `_afterStake` for strategy-specific setup performed
+  immediately after `stake` or `increaseStake`.
+- An override of `kindLabel` (mandatory for any concrete subclass).
+
+### 7.2 What subclasses MUST NOT do
+
+- Break the owner-side floor `(B × frac, (Q + T) × frac)`. After any
+  successful settlement triggered through any subclass-defined path,
+  the owner MUST be able to drain at least this much through
+  `unstake()` plus `claimRewards()`.
+- Redirect surplus away from the owner in owner-side functions.
+  Subclass `execute*` paths MAY route surplus to a non-owner recipient
+  as bounty per the subclass's own contract; owner functions MUST
+  always route surplus to the reward buffer.
+- Override or shadow base internal helpers (`_closePartial`,
+  `_settleBuffersAndStake`, `_expectedFreedAmounts`, `_resolvePool`).
+- Modify base storage slots from within `_afterStake`. Subclass-only
+  slots are fair game.
+- Reuse the base state constants `Empty`, `Staked`, `Settled` for
+  different semantics, or insert subclass slots that shift base slot
+  positions.
+
+These rules are SPEC-level constraints, not contract-enforced. Each
+concrete subclass MUST be reviewed and tested against them.
+
+### 7.3 Lifecycle hook
+
+`_afterStake(tokenId, liquidityDelta)` is the only base lifecycle
+hook. It is invoked from `stake()` and `increaseStake()` after `state
+= STATE_STAKED` and after the `Stake` event has been emitted. The
+default implementation is empty.
+
+Subclasses use this hook for one-time setup that depends on the
+position being in place — examples:
+
+- `KeeperStakingVault` does nothing (no setup needed beyond base).
+- `CowStakingVault` (deferred) approves the CoW VaultRelayer for both
+  pool tokens and registers a `ConditionalOrder` with ComposableCoW.
+
+The hook runs inside the calling function's `nonReentrant` frame.
+Subclass implementations MUST NOT make external calls to untrusted
+contracts that could re-enter the vault. Calls to trusted external
+registries (token approvals, ComposableCoW order creation) are
+acceptable. The hook MAY revert; a revert reverts the entire calling
+function (including the underlying NFPM mint/increase).
+
+`liquidityDelta` is the liquidity newly added by *this* call (initial
+full liquidity in `stake`; delta-only in `increaseStake`). Subclasses
+that care about cumulative liquidity read it via `positionLiquidity()`.
+
+## 8. Concrete subclasses
+
+### 8.1 ManualStakingVault
+
+The trivial concrete subclass. Adds nothing except an override of
+`kindLabel()` returning `keccak256("manual-staking-vault-v1")`. No new
+storage, no new functions, no `_afterStake` override.
+
+This is the canonical no-automation deployment. The owner is the sole
+settlement actor; there are no permissionless paths. The owner closes
+through `swap()` (Cases 2/3), `settle()` (Case 1), or escapes Case 4
+via `setYieldTarget(0)` followed by the appropriate settlement path.
+
+`ManualStakingVault` also serves as the reference vault for testing
+the base contract — the base test suite runs against
+`ManualStakingVault` because all owner-side behavior is unchanged from
+the base.
+
+### 8.2 KeeperStakingVault
+
+Adds two permissionless settlement entry points:
+
+**`executeSwap(...)` — Cases 2/3, full close, callback-based.** A
+keeper provides a callback contract; the vault closes the entire
+position, pushes the bid token (`tokenOut`) to the callback, and
+expects at least `amountInMin` of the ask token (`tokenIn`) returned
+within the same call frame. Keepers typically wrap `executeSwap` in a
+flash-loan callback (UV3 pool, Aave, Balancer) to source `tokenIn`
+without pre-funded inventory. Keepers profit from the spread between
+the LVR-implied rate and external markets.
+
+Always full close. Yield-target preservation: a partial close would
+shrink `T` proportionally, leaving the remainder exposed to further
+drift. If keeper #1 closes 30%, keeper #2 may find a Case-4 position.
+The yield-target promise breaks. Keepers reaching `q ≥ Q + T` want the
+full position closed atomically.
+
+**`executeSettle(recipient, ...)` — Case 1, full close, no callback.**
+A permissionless caller triggers settlement when both surpluses are
+present. The vault fills the unstake buffer with `(B, Q)` and the
+reward buffer with `T` (the yield target portion). The remaining
+surplus over `(B, Q + T)` is transferred to the caller-supplied
+`recipient` as bounty. The bounty compensates gas and incentivizes
+permissionless settlement so the owner's yield target is realized
 without owner action.
 
 In practice the bounty is small. Case 1 only arises when UV3 fees push
 both `b` past `B` and `q` past `Q + T` simultaneously. If either
 inequality were strict by more than a dust amount, the position would
-already have been in Case 2 or 3 and a `flashSwap()` keeper would have
-settled it earlier. Case 1 is an edge case at the four-quadrant origin,
-and its bounty reflects that.
+already have been in Case 2 or 3 and an `executeSwap` keeper would
+have settled it earlier. Case 1 is an edge case at the four-quadrant
+origin, and its bounty reflects that.
 
-The owner trades the surplus over `(B, Q + T)` against the guarantee
-that the position settles automatically when T is reached. For typical
-positions with small Case-1 surplus, this is a favorable trade.
+The owner-side floor is preserved: `unstake()` plus `claimRewards()`
+returns at least `(B, Q + T)` to the owner regardless of whether
+settlement happened via `executeSwap` (with surplus in reward buffer)
+or `executeSettle` (with surplus to bounty recipient). The owner
+trades the surplus over `(B, Q + T)` for the guarantee that the
+position settles automatically when the target is reachable.
 
-### 5.4 `flashSettle()` — owner exit
+### 8.3 CowStakingVault (deferred)
 
-Owner only. Any case (including Underwater). Partial-capable.
+Future subclass that integrates with CoW Protocol's solver network via
+ERC-1271 signatures and ComposableCoW conditional orders. Settlement
+flows through CoW solvers rather than direct keepers; the LVR-implied
+rate is offered as a limit order that solvers can fill within their
+batch auctions.
 
-Mechanics:
+`_afterStake` does the strategy-specific setup: approving the CoW
+VaultRelayer for both pool tokens and registering a `ConditionalOrder`
+with the canonical ComposableCoW contract.
 
-- Position closes `liquidity` units, freeing `(b, q)` proportional to
-  the close fraction
-- All freed `(b, q)` is pushed to `callbackTarget`
-- Callback must return `(B × frac, (Q + T) × frac)` to the vault
-- Vault verifies and fills buffers additively
-- Owner subsequently calls `unstake()` and `claimRewards()` to drain
+Specification deferred to a future SPEC contingent on a watch-tower
+spike validating that the public CoW watch-tower reliably picks up and
+serves the vault's conditional orders. If the spike succeeds, this
+becomes `spec-0003e-cow-staking-vault.md`.
 
-This is **not a swap**. The helper receives whatever the pool gave at
-execution time and must return the deposit-plus-target. Whether the
-helper needs to swap, top up from inventory, or use a flash loan
-depends on the case classification at execution time:
+The hook design (`_afterStake` plus state-extensibility via `uint8`
+constants) was sized specifically to accommodate this subclass without
+base modifications.
 
-- Case 1 (b > B, q > Q+T): helper holds surplus, returns the targets,
-  keeps the rest (functionally a private `settle` for the owner)
-- Cases 2/3: helper has imbalance, swaps externally, returns targets
-- Case 4: helper has shortfalls on both sides, must source liquidity
-  via flash loan or owner inventory
-
-Overpayment is accepted on both sides and flows to `rewardBuffer`. This
-makes defensive helper implementations safe — round-up buffers,
-slippage cushions, and flash-loan fee margins all over-return without
-revert risk, and the surplus flows back to the owner.
-
-Purpose: enable owner exit (full or partial) without requiring the
-owner to bring matched capital. The helper bridges the capital gap; the
-owner recovers only the bridging cost plus flash fees plus gas. This
-contrasts with the alternative path `swap → unstake → claimRewards`,
-which requires the owner to bring full `amountIn` from external
-inventory.
-
-## 6. State machine
-
-```
-            ┌─────────┐
-            │  Empty  │
-            └────┬────┘
-                 │ stake()
-                 ▼
-            ┌─────────┐
-            │ Staked  │ ───────┐
-            └────┬────┘        │ swap (partial)
-                 │             │ flashSettle (partial)
-                 │             │
-                 │ swap (full) │
-                 │ flashSwap   │
-                 │ settle      │
-                 │ flashSettle (full)
-                 │             │
-                 ├──◄──── FlashSwapInProgress (transient)
-                 ├──◄──── FlashSettleInProgress (transient)
-                 │             │
-                 │             ▼
-                 │        ┌─────────┐
-                 └───────►│ Settled │
-                          └─────────┘
-```
-
-States:
-
-- **Empty** — clone initialized, no position yet
-- **Staked** — active position, all settlement paths available
-- **FlashSwapInProgress** — transient, between callback push and verification
-- **FlashSettleInProgress** — transient, between callback push and verification
-- **Settled** — position fully closed, buffers filled, drains pending
-
-`unstake()` and `claimRewards()` are available in `Staked` and `Settled`.
-`stakeTopUp()` and `setYieldTarget()` are available only in `Staked`.
-
-The state lock during the two flash callbacks ensures all other vault
-functions revert during the callback frame, preventing reentrancy
-attacks and racing modifications.
-
-## 7. Buffer mechanics
+## 9. Buffer mechanics
 
 The vault holds two pairs of buffers:
 
@@ -330,80 +547,84 @@ The vault holds two pairs of buffers:
   including target T and any surplus. Drained by `claimRewards()`.
 
 Buffers fill **additively** across multiple settlement calls. A vault
-may settle in pieces (multiple partial swaps, then a full flashSettle,
-etc.); each call adds to existing buffer balances. Drains zero out the
-respective buffers and transfer to owner.
+may settle in pieces (multiple partial swaps, then a final swap or
+settle, etc.); each call adds to existing buffer balances. Drains zero
+out the respective buffers and transfer to owner.
 
-Per-case buffer increments:
+Per-path buffer increments (and bounty/recipient flow where applicable):
 
-| Path | unstakeBase += | unstakeQuote += | rewardBase += | rewardQuote += |
-|------|----------------|------------------|---------------|----------------|
-| `swap` (Case 2) | B × frac | Q × frac | (b − B × frac) | (q + amountIn − Q × frac) |
-| `swap` (Case 3) | B × frac | Q × frac | (b + amountIn − B × frac) | (q − Q × frac) |
-| `flashSwap` (Case 2) | B | Q | (b − B) | (q + amountIn − Q) |
-| `flashSwap` (Case 3) | B | Q | (b + amountIn − B) | (q − Q) |
-| `settle` | B | Q | 0 | T |
-| `flashSettle` (any case) | B × frac | Q × frac | (postBase − B × frac) | (postQuote − Q × frac) |
+| Path | Where | unstakeBase += | unstakeQuote += | rewardBase += | rewardQuote += | Direct to recipient |
+|------|-------|----------------|------------------|---------------|----------------|---------------------|
+| `swap` (Case 2) | Base | B × frac | Q × frac | b − B × frac | q + amountIn − Q × frac | — |
+| `swap` (Case 3) | Base | B × frac | Q × frac | b + amountIn − B × frac | q − Q × frac | — |
+| `settle` (Case 1) | Base | B × frac | Q × frac | b − B × frac | q − Q × frac | — |
+| `executeSwap` (Case 2) | Keeper | B | Q | b − B | q + amountIn − Q | — |
+| `executeSwap` (Case 3) | Keeper | B | Q | b + amountIn − B | q − Q | — |
+| `executeSettle` (Case 1) | Keeper | B | Q | 0 | T | b − B (base), q − (Q + T) (quote) |
 
-In `flashSettle`, `postBase` and `postQuote` are the actual amounts the
-helper returned (`≥ B × frac`, `≥ (Q+T) × frac`). Overpayment flows to
-reward.
+Note the asymmetry between `settle` and `executeSettle`: the base
+`settle` routes the entire surplus (including any base-side surplus
+and the `T`-portion of the quote-side surplus) into the reward buffers
+for the owner. The subclass `executeSettle` keeps `T` for the owner in
+the reward buffer but routes the surplus over `(B, Q + T)` to the
+caller-supplied recipient as bounty. Both preserve the owner-side
+floor `(B, Q + T)`.
 
-In `settle`, the surplus over `(B, Q+T)` does *not* flow to reward —
-it goes to the caller as bounty (see §5.3). The reward buffer receives
-exactly `T`.
+For `executeSwap`, callback overpayment (callback returning more than
+`amountInMin`) flows into the appropriate reward buffer slot via the
+balance-delta computation in `_settleBuffersAndStake`.
 
-## 8. Top-up
+## 10. State machine
 
-`stakeTopUp()` adds liquidity to the existing position. The vault adds
-the consumed `(amount0, amount1)` to `(B, Q)` proportionally. The yield
-target `T` is scaled by the new-to-old quote ratio:
+The base contract defines three persistent states:
 
 ```
-T_new = T_old × (Q + ΔQ) / Q   (rounded up)
+            ┌─────────┐
+            │  Empty  │
+            └────┬────┘
+                 │ stake()
+                 ▼
+            ┌─────────┐
+            │ Staked  │ ──── partial swap / partial settle ──┐
+            └────┬────┘                                       │
+                 │                                            │
+                 │ swap (full) / settle (full)                │
+                 │                                            │
+                 ▼                                            │
+            ┌─────────┐                                       │
+            │ Settled │◄──────────────────────────────────────┘
+            └─────────┘
 ```
 
-Rounding up prevents downward drift on repeated tiny top-ups. Skipped if
-`Q == 0` (no anchor to scale against — a base-only initial deposit
-with later top-up keeps T constant).
+`unstake()` and `claimRewards()` are available in `Staked` and
+`Settled`. `increaseStake()` and `setYieldTarget()` are available only
+in `Staked`.
 
-The implicit yield rate `T / Q` stays constant (modulo rounding). An
-owner who originally deposited 1000 quote at T = 100 (10%) and later
-adds another 1000 quote ends up with `B' = 2 × B`, `Q' = 2000`,
-`T' = 200` — same 10% rate over the larger position.
+Subclasses with callback-based permissionless paths add transient
+states. `KeeperStakingVault` adds:
 
-## 9. Yield target mutability
+- `ExecuteSwapInProgress` (transient, set during the `executeSwap`
+  callback frame; reverts to `Settled` on successful return).
 
-`setYieldTarget()` allows the owner to change `T` while staked. This
-serves three purposes:
+The transient state is not just for reentrancy protection — it also
+makes the in-progress condition observable. An indexer seeing an
+`ExecuteSwapInitiated` event without a matching `Swap` event in the
+same transaction knows the call reverted. And because base entry
+points all check for `state == Staked` strictly, the transient state
+naturally blocks all base functions during the callback frame, layered
+on top of OpenZeppelin's `nonReentrant`.
 
-1. **Lower T to escape Underwater.** Setting `T = 0` always makes the
-   position Executable (Cases 2 or 3). Useful when the owner concedes
-   the target and wants to exit at break-even on principal alone.
-
-2. **Raise T to take more risk.** Owner extends their reward
-   expectation, accepting that the position stays open longer.
-
-3. **Adjust to changed pool conditions.** Volume regime shifts may
-   warrant target recalibration without forcing a close + re-stake.
-
-Mutability is protected against keeper front-running by the slippage
-parameters at the keeper's call site. The keeper specifies its accepted
-bounds via `amountInMax` / `amountOutMin`; if the owner raises T
-between the keeper's quote and execution, the keeper's bounds are
-violated and the call reverts cleanly. No locking or commit-reveal is
-needed.
-
-## 10. Pricing and oracle stance
+## 11. Pricing and oracle stance
 
 The vault uses **no external price oracle and no pool TWAP**. All
 pricing is deterministic from the pool state at execution time:
 
 - `pool.slot0().sqrtPriceX96` — current spot price, used to compute
-  `(b, q)` from the partial close
-- NFPM `positions(tokenId)` — current liquidity, fee growth, owed amounts
+  `(b, q)` from the partial close.
+- NFPM `positions(tokenId)` — current liquidity, fee growth, owed
+  amounts.
 - `LiquidityAmounts.getAmountsForLiquidity` — to convert liquidity ×
-  sqrtPrice to token amounts
+  sqrtPrice to token amounts.
 
 The four-case classification depends only on `(b, q)` versus
 `(B × frac, (Q + T) × frac)`. There is no rate-decision step that
@@ -412,184 +633,174 @@ requires an oracle.
 Consequences:
 
 - No deployment dependency on Chainlink, third-party feeds, or
-  cross-pool basis
-- No TWAP-manipulation surface
-- Per-call gas is reduced (no oracle round-trip)
+  cross-pool basis.
+- No TWAP-manipulation surface.
+- Per-call gas is reduced (no oracle round-trip).
 - Pricing is exactly the LVR-implied rate, which is always at or below
   current spot — keepers self-select based on whether external markets
   give them better prices (in which case they don't act and the vault
-  stays open)
+  stays open).
 
-The trade-off is that the vault cannot offer a "spot-priced" trade. In
-particular, a Case-4 position cannot be closed by the vault itself
-without owner action (either lower T or use flashSettle). This is by
-design: the no-oracle stance is non-negotiable and Case 4 is rare and
-recoverable.
+The trade-off is that the vault cannot offer a "spot-priced" trade. A
+Case-4 position cannot be closed by the vault itself; the owner's only
+recovery path is `setYieldTarget(0)` (or any value low enough to
+convert Case 4 into Case 1, 2, or 3). This is by design: the no-oracle
+stance is non-negotiable and Case 4 is rare and recoverable.
 
-## 11. Solver-network compatibility
+## 12. Multicall
 
-Each settlement path moves exactly one token in and exactly one token
-out per call (or zero in the no-trade paths). This single-direction
-property is essential for solver-network compatibility — limit-order
-solvers (Composable CoW, similar) cannot express "executor sends X
-base AND Y quote, receives Z quote" in a single atomic intent.
+The vault inherits OpenZeppelin's `Multicall` mixin, allowing the
+owner to bundle multiple calls atomically. Common patterns:
 
-The vault's `quoteSwap()` returns the exact `(bidToken, bidAmount,
-askToken, askAmountMin)` at full close. A solver-network adapter or
-keeper bot can read this view, decide whether to act, and call
-`flashSwap()` (or `swap()` for owner-side flows) without further
-negotiation.
+- `setYieldTarget(0)` then `swap(...)` or `settle(...)` — owner
+  escapes Underwater and immediately settles via the resulting case.
+- `unstake()` then `claimRewards()` — drain both buffers in one tx.
+- `swap(...)` then `unstake()` then `claimRewards()` — owner
+  self-executes a trade and immediately drains.
+- `settle(partialLiquidity, ...)` then `claimRewards()` — owner
+  harvests accumulated surplus without full exit and immediately
+  claims it.
+- `increaseStake(...)` then `setYieldTarget(...)` — owner adds capital
+  and re-anchors the yield rate atomically (different from the
+  proportional auto-scaling that `increaseStake` applies).
 
-The atomic-trade form of `swap()` matches solver-routing patterns where
-the settlement contract holds `tokenIn` from another order in the same
-batch. The callback form of `flashSwap()` matches keeper patterns where
-the bot needs to bridge funds via a flash loan.
+Per-call state checks remain authoritative — `multicall` does not
+bypass them. The `nonReentrant` modifier across calls in the same
+multicall is handled per individual call (each enters and exits its
+own guard).
 
-The vault thus supports both **direct keepers** (no solver network,
-take the LVR rate directly) and **solver-network integration** (vault
-appears as a venue in a routed order), without requiring different
-contract paths.
-
-## 12. Reward direction
-
-The yield target is quote-denominated. The owner's reward is
-quote-denominated. Base-side fees collected during settlement flow into
-the swap step (executor takes them in Cases 2/3) or into the bounty
-(caller takes them in Case 1) or into the reward buffer (in
-flashSettle's overpayment path).
-
-The owner sees a clean quote-denominated outcome on `claimRewards()`,
-plus base-side amounts only when surplus flows through `flashSettle`'s
-overpayment path or through `swap`'s buffer increments. The latter is
-typically small (fee accumulation, not principal drift).
-
-## 13. Reentrancy and state locks
-
-All state-mutating functions use OpenZeppelin's `nonReentrant` modifier
-as a baseline guard against unexpected reentrancy from non-standard
-tokens (ERC-777, fee-on-transfer hooks, transfer hooks).
-
-The two flash paths add explicit state locks:
-
-- `flashSwap` sets state to `FlashSwapInProgress` before the callback
-- `flashSettle` sets state to `FlashSettleInProgress` before the callback
-
-While in either of these states, all other vault functions revert via
-the state-check modifiers. This is a stronger, semantically richer guard
-than `nonReentrant` alone — it prevents not just direct reentrancy but
-also any cross-function interaction during the callback frame.
-
-The state lock also makes the in-progress condition observable. An
-indexer seeing a `FlashSwapInitiated` event without a matching `Swap`
-event in the same transaction knows the call reverted.
-
-## 14. Multicall
-
-The vault inherits OpenZeppelin's `Multicall` mixin, allowing the owner
-to bundle multiple calls atomically. Common patterns:
-
-- `setYieldTarget` then `flashSettle`, to lower T just-in-time for an
-  Underwater exit
-- `unstake` then `claimRewards`, to drain both buffers in one tx
-- `swap` (partial) then `unstake` then `claimRewards`, for an owner-
-  driven manual close cycle
-
-Per-call state checks remain authoritative — `multicall` does not bypass
-them. The `nonReentrant` modifier across calls in the same multicall
-is handled per individual call (each enters and exits its own guard).
-
-## 15. Out of scope
+## 13. Out of scope
 
 The following are explicitly out of scope for this RFC:
 
-- **CoW-Swap adapter**. A separate concern that wraps the vault's
-  `flashSwap()` and `quoteSwap()` to make vaults visible to a CoW
-  solver network. The vault's interface is designed to be compatible
-  but the adapter itself is not part of the vault.
-
-- **Multi-position vaults**. Each vault wraps exactly one NFT. Owners
+- **Multi-position vaults.** Each vault wraps exactly one NFT. Owners
   with multiple positions deploy multiple vaults via the factory.
 
-- **Cross-vault accounting**. Each vault is fully self-contained. There
-  is no protocol-level treasury, fee, or shared state.
+- **Cross-vault accounting.** Each vault is fully self-contained.
+  There is no protocol-level treasury, fee, or shared state.
 
-- **Vault transferability**. The owner is bound at clone init time and
-  cannot be changed. Owners who want to transfer ownership use
-  `flashSettle` to exit and re-stake under the new owner.
+- **Vault transferability.** The owner is bound at clone init time
+  and cannot be changed. Owners who want to transfer ownership
+  effectively close out (`setYieldTarget(0)` + settle if needed) and
+  re-stake under the new owner.
 
-- **Per-vault TWAP windows or oracle configuration**. Removed in this
-  rewrite — the vault is fully oracle-free.
+- **Per-vault TWAP windows or oracle configuration.** The vault is
+  fully oracle-free.
 
-## 16. Design decisions log
+- **Range adjustment after `stake()`.** No changes to `tickLower`,
+  `tickUpper`, no reposition. `increaseStake` only adds liquidity to
+  the existing range.
+
+- **Subclass-specific specifications.** Each concrete subclass has
+  its own SPEC. This RFC defines the architecture and the contract
+  the base offers; SPEC-0003b implements the base plus
+  `ManualStakingVault`; SPEC-0003c implements `KeeperStakingVault`;
+  the future `CowStakingVault` will have its own SPEC contingent on
+  the watch-tower spike.
+
+- **Vault-implementation registry / multi-kind factory.** Specified
+  separately in `spec-0003d-vault-implementation-registry.md`.
+
+## 14. Design decisions log
 
 Decisions made during chat-mode design that are now baked in:
 
-- **Liquidity over basis points**. NFPM liquidity units (uint128) are
-  used as the close-size parameter, replacing the earlier `bps`-based
-  approach. Liquidity is the natural primitive for UV3, makes top-up
-  semantics simpler, and avoids the implicit-vs-explicit-fraction
-  confusion of `pendingBps`.
+- **Abstract base + concrete subclasses.** The owner-side contract is
+  invariant across automation strategies and lives in the abstract
+  base. Permissionless settlement strategies are concrete subclasses.
+  This split was driven by the realization that CoW Protocol
+  integration requires non-trivial setup that doesn't fit
+  keeper-style automation, and the future need to support multiple
+  parallel strategies without forking the core vault.
 
-- **No `pendingBps` mechanism**. Removed. The owner uses the explicit
-  `liquidity` parameter at the call site of `swap` or `flashSettle`.
-  Permissionless paths (`flashSwap`, `settle`) are always full close.
+- **Verb-based naming taxonomy.** Pure verbs (`swap`, `settle`,
+  `stake`, `increaseStake`, `unstake`, `claimRewards`) are
+  owner-only. Subclass `execute*` variants (`executeSwap`,
+  `executeSettle`) are permissionless. View functions use the
+  `quote*` prefix (`quoteSwap`, `quoteSettle`).
 
-- **Four settlement paths, not one**. Earlier drafts had a single
-  `swap()` that handled all roles and cases. Splitting into `swap`
-  (owner-trade), `flashSwap` (keeper-trade), `settle` (Case 1 bounty),
-  `flashSettle` (owner-exit-with-helper) gives each path a single,
-  clear responsibility and matches the actual economic actor in each
-  scenario.
+- **`stakeTopUp` renamed to `increaseStake`.** Verb-taxonomy
+  consistency. Symmetric with a hypothetical future `decreaseStake`
+  if needed (currently out of scope).
 
-- **Bounty-as-surplus in settle**. The bounty for Case 1 is the surplus
-  over `(B, Q + T)`. Owner trades this surplus against the
-  permissionless settlement guarantee. In practice the surplus is
-  small (Case 1 only arises near the four-quadrant origin), so the
-  trade is favorable.
+- **No `flashSettle` function.** Earlier drafts had a callback-based
+  owner exit covering all cases including Underwater. Removed in
+  favor of the simpler `setYieldTarget(0)` Underwater-escape: the
+  owner reduces T to make the position settle-able, then exits via
+  the appropriate base path. This eliminates a callback interface,
+  a transient state, and a complex helper-contract design surface.
 
-- **Underwater = T-escapable**. Mathematically Case 4 is only reachable
-  when `T > 0`. Setting `T = 0` always makes the position Executable.
-  This is documented as the recommended path out of Underwater, in
-  addition to `flashSettle` with helper.
+- **`settle()` is owner-only and partial-capable.** Earlier drafts
+  had `settle` as the permissionless Case-1 path. The permissionless
+  Case-1 path is now `executeSettle()` in the keeper subclass. The
+  base `settle()` is the symmetric counterpart to `swap()` for
+  owner-side action: same partial-capable, same buffer-routing
+  semantics, just for the no-trade case. The base contract therefore
+  gives the owner a complete settlement toolkit without any subclass
+  automation.
 
-- **No oracle, no TWAP**. Earlier drafts proposed a 5%-discount Case
+- **Liquidity over basis points.** NFPM liquidity units (uint128) are
+  used as the close-size parameter. Liquidity is the natural
+  primitive for UV3, makes top-up semantics simpler, and avoids the
+  implicit-vs-explicit-fraction confusion of an earlier `pendingBps`
+  draft.
+
+- **`uint8` state with constants instead of Solidity `enum`.** Allows
+  subclasses to extend the state set with their own values starting
+  at 3 without forking the enum or adding cross-subclass coupling.
+
+- **Bounty-as-surplus in `executeSettle`.** The bounty for Case 1 in
+  the keeper subclass is the surplus over `(B, Q + T)`. The
+  yield-target T itself stays with the owner via the reward buffer.
+  Owner trades the surplus against the guarantee that the position
+  settles automatically when the target is reached.
+
+- **Underwater = T-escapable.** Mathematically Case 4 is only
+  reachable when `T > 0`. Setting `T = 0` always makes the position
+  settle-able. This is the canonical Underwater-escape, replacing
+  earlier callback-based helper designs.
+
+- **No oracle, no TWAP.** Earlier drafts proposed a 5%-discount Case
   for both-surplus situations using TWAP-spot pricing. Replaced by
-  `settle` with surplus-as-bounty. The vault is now fully oracle-free.
+  the `executeSettle` bounty mechanism. The vault is now fully
+  oracle-free.
 
-- **Overpayment to reward in flash callbacks**. Both `flashSwap` and
-  `flashSettle` accept callback over-return as overpayment that flows
-  to the reward buffer. This makes defensive helper implementations
-  safe (round-up buffers, slippage cushions).
+- **Overpayment to reward in `executeSwap`.** Callback overpayment
+  flows into the reward buffer via the post-call balance-delta
+  computation. This makes defensive callback implementations safe
+  (round-up buffers, slippage cushions, flash-loan fee margins).
 
-- **`callbackTarget == address(0)` rejected**. Earlier draft proposed a
-  no-callback mode for `flashSettle`. Removed because the use cases
-  it would address are already covered by `swap`, `settle`, or direct
-  pre-funding plus drain. Keeping `flashSettle` callback-only
-  simplifies the contract and clarifies the function's purpose.
+- **Owner-side floor as central invariant.** All settlement paths,
+  base or subclass, MUST preserve `unstake() + claimRewards() ≥
+  (B × frac, (Q + T) × frac)` for any settled fraction `frac`. This
+  is the protocol's contract with the position owner, and it is the
+  one thing subclasses MUST NOT break.
 
-## 17. Open questions
+## 15. Open questions
 
-- **Bounty floor for `settle()`**. Should `settle` revert if both
-  surpluses are zero (boundary case)? Current decision: no, because the
-  position *is* settle-able and an owner-affiliated helper may want to
-  trigger settlement even without bounty. A bot operator who only
-  cares about profit will simply not call when the bounty is zero.
+- **Bounty floor for `executeSettle()`.** Should the function revert
+  if both surpluses are zero (boundary case)? Current decision: no,
+  because the position *is* settle-able and an owner-affiliated
+  helper may want to trigger settlement even without bounty. A bot
+  operator who only cares about profit will simply not call when the
+  bounty is zero.
 
-- **Recipient for `swap()`**. Currently `recipient` is mandatory and
+- **Recipient for `swap()`.** Currently `recipient` is mandatory and
   cannot be `address(0)`. Should `address(0)` be interpreted as
   "owner"? Decision: no, explicitness preferred. Owner specifies
   `recipient = msg.sender` if they want to send to themselves.
 
-- **Slippage protection for `flashSettle`**. Currently no slippage
-  bounds. Helper-side slippage protection is the helper-contract's
-  responsibility. Should we add explicit bounds on `flashSettle` for
-  cases where the owner uses a generic helper they don't fully
-  control? Open.
+- **Permissionless `executeSettle()` recipient policy.** Should there
+  be any policy on who can be the recipient (e.g., must equal
+  `msg.sender`)? Currently no — operator can route to any address.
+  Counter-argument that no abuse vector exists: the owner's
+  deposit-plus-target is preserved regardless; only the small
+  surplus is at stake, and it's already routed away from the owner
+  by design.
 
-- **Permissionless `settle()` recipient policy**. Should there be any
-  policy on who can be the recipient (e.g., must equal `msg.sender`)?
-  Currently no — operator can route to any address. Open whether
-  abuse vectors exist (e.g., spam settle calls to drain owner's
-  surplus to attacker-controlled addresses). Counter-argument: the
-  owner's deposit-plus-target is preserved regardless, only the small
-  surplus is at stake.
+- **Future `decreaseStake()` symmetry.** Currently no path exists to
+  reduce position size without going through full settlement. A
+  hypothetical `decreaseStake` could mirror `increaseStake` for
+  partial principal withdrawal without forcing a settle. Out of
+  scope for this RFC; if needed it would be a SPEC follow-up
+  (SPEC-0003*).
