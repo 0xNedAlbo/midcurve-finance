@@ -1,13 +1,16 @@
 # What is a `uniswapv3-staking-vault` position?
 
-> Phase 1 concept document for the Uniswap V3 Staking Vault integration,
-> per [how-to-implement-new-positions.md](../../how-to-implement-new-positions.md).
-> This document fixes the position's identity, lifecycle, and economic
-> invariant. It is the north star for Phase 2 (metrics) and Phase 3 (UI).
-> See [mental-model.md](./mental-model.md) for the user-facing framing
-> that motivates the decisions captured here. Authoritative on-chain
-> sources are [rfc-0003-staking-vault.md](./rfc-0003-staking-vault.md)
-> for the architecture, [spec-0003b-abstract-staking-vault.md](./spec-0003b-abstract-staking-vault.md)
+> Phase 1 + 2 concept document for the Uniswap V3 Staking Vault
+> integration, per [how-to-implement-new-positions.md](../../how-to-implement-new-positions.md).
+> Phase 1 fixes the position's identity, lifecycle, and economic
+> invariant. Phase 2 extends with the metric methodology — common
+> metric mapping, type-specific `state` shape, and PnL decomposition.
+> This document is the north star for Phase 3 (UI) and Phase 4
+> (automation). See [mental-model.md](./mental-model.md) for the
+> user-facing framing that motivates the decisions captured here.
+> Authoritative on-chain sources are
+> [rfc-0003-staking-vault.md](./rfc-0003-staking-vault.md) for the
+> architecture, [spec-0003b-abstract-staking-vault.md](./spec-0003b-abstract-staking-vault.md)
 > for the abstract base and `ManualStakingVault`, and
 > [spec-0003c-keeper-staking-vault.md](./spec-0003c-keeper-staking-vault.md)
 > for `KeeperStakingVault`.
@@ -407,14 +410,6 @@ Risk discussion should always specify which class is in scope.
 
 ## 2.1 Common metric mapping
 
-> **⚠ Phase 2 rewrite pending.** The §2 sections below were authored
-> against the earlier SPEC-0003a contract. They reference removed
-> mechanics (`partialUnstakeBps` / `effectiveBps`, `flashClose`,
-> permissionless `swap`) and need to be rewritten against
-> RFC-0003 + SPEC-0003b/c. A separate Phase-2 pass will reconcile
-> the metric mapping, type-specific `state` shape, event taxonomy,
-> and journal-posting rule with the new contract surface.
-
 **Global valuation rule.** All live valuations of quote-denominated
 quantities use the current pool price from `pool.slot0().sqrtPriceX96`.
 External price sources (Coingecko, Chainlink, CEX aggregators) are not
@@ -434,11 +429,11 @@ costBasis`, not a stored cumulative.
 | `ownerWallet` | The on-chain vault owner, set at clone init and immutable | `vault.owner()` once at import | `evm:<address>` | Live, immutable after init |
 | `currentValue` | Mark-to-market of vault contents at pool price: filled buffers + active wrapped-NFT liquidity (projected onto current tick) + uncollected UV3 fees, all in quote | `vault.unstakeBufferBase/Quote`, `vault.rewardBufferBase/Quote`, `npm.positions(tokenId).liquidity`, `tokensOwed*`, `pool.slot0()` | Quote bigint via `isToken0Quote` mapping; `base × P_pool + quote` decomposition | Live |
 | `costBasis` | Cumulative quote value of capital currently deployed | Ledger-cumulative; written on `STAKING_DEPOSIT` (positive) and `STAKING_DISPOSE` (proportional negative) | Quote bigint | Ledger-derived |
-| `realizedPnl` | Quote-denominated PnL recognised at disposal (`B × ΔP` insight: the principal payout valued at `P_settle` minus its proportional cost basis, minus any flash-loan fee) | Ledger-cumulative; written on `STAKING_DISPOSE` | Quote bigint | Ledger-derived |
+| `realizedPnl` | Quote-denominated PnL recognised at disposal (`B × ΔP` insight: the principal payout valued at `P_settle` minus its proportional cost basis) | Ledger-cumulative; written on `STAKING_DISPOSE` | Quote bigint | Ledger-derived |
 | `realizedCashflow` | n/a — no periodic income stream in the vault model | — | `0` | constant |
 | `unrealizedPnl` | Standard derived value `currentValue − costBasis` | Computed | Quote bigint | Live (derived) |
 | `unrealizedCashflow` | n/a | — | `0` | constant |
-| `collectedYield` | Cumulative quote value of yield recognised at the disposal that filled the reward buffer; valued at `P_settle` | Ledger-cumulative; written on `STAKING_DISPOSE` (the reward-fill component) | Quote bigint | Ledger-derived |
+| `collectedYield` | Cumulative quote value of yield recognised at the disposal that filled the reward buffer; valued at `P_settle`. **Owner-realised** yield: excludes capital-cycling on `owner-swap` and the bounty-payout on `keeper-settle` (see §2.3). | Ledger-cumulative; written on `STAKING_DISPOSE` (the reward-fill component) | Quote bigint | Ledger-derived |
 | `unclaimedYield` | Quote-valued contents of the reward buffer (UV3 fees + LVR substance + allocated `T` share) | `vault.rewardBufferBase × P_pool + vault.rewardBufferQuote` | Quote bigint | Live |
 | `lastYieldClaimedAt` | Timestamp of the most recent `STAKING_CLAIM_REWARDS` event | Ledger | Date | Ledger-derived |
 | `baseApr` | Time-weighted APR computed from `collectedYield` over weighted average `costBasis`, bracketed on `STAKING_DEPOSIT` and `STAKING_DISPOSE` events | `PositionAprPeriod` aggregation | Float, basis-point precision | Aggregated from ledger periods |
@@ -449,38 +444,39 @@ costBasis`, not a stored cumulative.
 
 **Notes on three contested choices.**
 
-- **`currentValue` is mark-to-market, not settlement-now or
-  flashClose-now.** Settlement-now valuation collapses under
-  Underwater (where `swap()` reverts); flashClose-now requires a
-  flash-loan-fee estimate that is not pool-intrinsic. Mark-to-market
-  is always well-defined and symmetric with NFT valuation, which
-  matters for portfolio-level aggregates.
+- **`currentValue` is mark-to-market, not settlement-now.**
+  Settlement-now valuation collapses under Underwater (where every
+  settlement path reverts). Mark-to-market is always well-defined
+  and symmetric with NFT valuation, which matters for portfolio-level
+  aggregates.
 
 - **`collectedYield` recognises at disposal time, symmetric with
   `realizedPnl`.** Both are recognised at the same event
   (`STAKING_DISPOSE`) because both reflect the realisation of position
-  economics — `realizedPnl` for the principal component, `collectedYield`
-  for the yield component. The drain events (`STAKING_UNSTAKE`,
-  `STAKING_CLAIM_REWARDS`) are pure asset/liability movements within
-  the position's accounting; they have no recognition impact.
+  economics — `realizedPnl` for the principal component,
+  `collectedYield` for the yield component. The drain events
+  (`STAKING_UNSTAKE`, `STAKING_CLAIM_REWARDS`) are pure asset/
+  liability movements within the position's accounting; they have
+  no recognition impact.
 
   The mark-to-market value of buffered tokens between disposal and
   drain is reflected only in `unrealizedPnl` (live valuation of the
-  buffer at pool price vs. its booked value at disposal). It does not
-  produce a separate realised PnL component; the buffered tokens are
-  held at-cost from the disposal moment until they leave the vault.
-  Any FX drift on the base component between disposal and drain is
-  visible to the user via the `unrealizedPnl` movement, then folds
-  into the next disposal's `Realized Gains` / `Realized Losses` if
-  not yet drained.
+  buffer at pool price vs. its booked value at disposal). It does
+  not produce a separate realised PnL component; the buffered tokens
+  are held at-cost from the disposal moment until they leave the
+  vault. Any FX drift on the base component between disposal and
+  drain is visible to the user via the `unrealizedPnl` movement,
+  then folds into the next disposal's `Realized Gains` /
+  `Realized Losses` if not yet drained.
 
 - **`priceRangeLower/Upper` is the wrapped-NFT range, not the
   swap-executable band.** The NFT range is the region where the
   position is productive (rebalancing, accruing fees) — the same
   semantics as for a bare NFT position, and the same condition under
   which the position is in profit at settlement (modulo the LVR
-  substance ceded to the executor). The Underwater condition is
-  surfaced separately in `state.swapStatus`, not via the range field.
+  substance ceded to the settlement counterparty). The Underwater
+  condition is surfaced separately in `state.swapStatus`, not via
+  the range field.
 
 ## 2.2 Type-specific metrics
 
@@ -488,36 +484,87 @@ The `state` JSON shape under `@midcurve/shared/src/types/position/uniswapv3-stak
 
 | Field | Type | Source | UI consumer |
 |---|---|---|---|
-| `vaultState` | `'Empty' \| 'Staking' \| 'Settled'` | `vault.state()`, mapped (on-chain `Staked → Staking`; `FlashCloseInProgress` is transient and never observed between transactions) | Lifecycle badge in card header |
-| `swapStatus` | `'NotApplicable' \| 'NoSwapNeeded' \| 'Executable' \| 'Underwater'` | `vault.quoteSwap().status` | Health indicator badge; gates the self-execute swap button |
-| `swapQuote` | `{ tokenIn, minAmountIn, tokenOut, amountOut, effectiveBps } \| null` | `vault.quoteSwap()` (full struct) | Swap tab in detail page; informs the close-position formular |
-| `stakedBase` | `bigint` | `vault.stakedBase()` | Current-stake display; input for PnL-curve simulation |
-| `stakedQuote` | `bigint` | `vault.stakedQuote()` | dito |
-| `yieldTarget` | `bigint` | `vault.yieldTarget()` | "T" display; key configuration parameter |
-| `pendingBps` | `number` (0..10000) | `vault.partialUnstakeBps()` | "Partial unstake pending: X%" indicator |
-| `effectiveBps` | `number` (1..10000) | derived: `pendingBps == 0 ? 10000 : pendingBps` | Shows what fraction the next swap would actually settle |
+| `kindLabel` | `'manual-staking-vault-v1' \| 'keeper-staking-vault-v1' \| 'cow-staking-vault-v1'` | `vault.kindLabel()` once at import (immutable post-deploy) | Subclass badge in card header; gates Keeper-specific UI elements (e.g., bounty history, `executeSettle` status panels) |
+| `vaultState` | `'Empty' \| 'Staking' \| 'Settled'` | `vault.state()`, mapped (on-chain `Staked → Staking`; subclass transient states like `ExecuteSwapInProgress` are never observed between transactions) | Lifecycle badge in card header |
+| `swapStatus` | `'NotApplicable' \| 'NoSwapNeeded' \| 'Executable' \| 'Underwater'` | derived from current `(b, q)` projection vs. `(B × frac, (Q + T) × frac)` per RFC-0003 §4 case classification: Case 1 → `NoSwapNeeded`, Cases 2/3 → `Executable`, Case 4 → `Underwater`; `NotApplicable` when `vaultState != Staking` | Health indicator badge (Underwater); gates settlement action buttons (`NoSwapNeeded` → Settle button, `Executable` → Swap button, `Underwater` → both disabled, prompts the user to lower `T`) |
+| `swapQuote` | `{ tokenIn, minAmountIn, tokenOut, amountOut, liquidity } \| null` | `vault.quoteSwap(currentLiquidity)`; `null` if `swapStatus ∉ {Executable}` | Swap tab in detail page; informs the close-position formular |
+| `settleQuote` | `{ unstakeBase, unstakeQuote, rewardBase, rewardQuote, liquidity } \| null` | `vault.quoteSettle(currentLiquidity)`; `null` if `swapStatus != NoSwapNeeded` | Settle tab in detail page; shows the buffers a full settle would fill |
+| `stakedBase` | `bigint` | `vault.stakedBase()` (slot `B` in SPEC) | Current-stake display; input for PnL-curve simulation |
+| `stakedQuote` | `bigint` | `vault.stakedQuote()` (slot `Q` in SPEC) | dito |
+| `yieldTarget` | `bigint` | `vault.yieldTarget()` (slot `T` in SPEC) | "T" display; key configuration parameter |
+| `currentLiquidity` | `bigint` | `npm.positions(wrappedTokenId).liquidity` | "Active liquidity" indicator; decrements on partial swap/settle; the card may render `currentLiquidity / initialLiquidity` to show how much of the position remains |
 | `unstakeBufferBase`, `unstakeBufferQuote` | `bigint` | `vault.unstakeBufferBase/Quote()` | Drain-principal button gating (enabled if > 0) |
 | `rewardBufferBase`, `rewardBufferQuote` | `bigint` | `vault.rewardBufferBase/Quote()` | Claim-rewards button gating (enabled if > 0) |
-| `sqrtPriceX96` | `bigint` | `pool.slot0().sqrtPriceX96` | Pool price display; input for currentValue and swapStatus |
+| `sqrtPriceX96` | `bigint` | `pool.slot0().sqrtPriceX96` | Pool price display; input for `currentValue` and `swapStatus` |
 | `currentTick` | `number` | `pool.slot0().tick` | In-range / out-of-range computation |
 | `poolLiquidity` | `bigint` | `pool.liquidity()` | Optional comparison display (own position vs. pool TVL) |
-| `wrappedNftLiquidity` | `bigint` | `npm.positions(wrappedTokenId).liquidity` | Active-liquidity indicator; null when `vaultState == Settled` |
+| `lifetimeBountyPaid` | `bigint` (quote-valued) | sum of `bountyValue` across all `STAKING_DISPOSE` events with `disposalKind == 'keeper-settle'` | "Bounty paid to keepers" display in the Keeper-vault history tab; `0` for Manual vaults |
 
-**Stale-quote handling.** `swapQuote` changes block-by-block as
-`sqrtPriceX96` moves. The cached value in `state` is only as fresh as
-the last refresh. Before any user-initiated swap action (the "Execute
-Swap" button in the swap tab), the UI must re-fetch the quote directly
-from RPC and reconcile with the cached value. If the drift exceeds a
-tolerated band, prompt the user to reconfirm — analogous to the
-existing slippage-protection pattern on NFT close orders.
+**Rationale for the changes from the SPEC-0003a draft:**
 
-**Wrapped-NFT internals deliberately excluded.** The `feeGrowthInside*X128`
-checkpoints, `tokensOwed*` snapshot, and tick-level fee-growth fields
-are implementation details of how `currentValue` and `unclaimedYield`
-are computed. The vault user does not see them: by design, the
-wrapper hides UV3 internals so the user sees a single quote-valued
-yield number, not a four-component fee picture. Power users who want
-the on-chain detail can use a block explorer.
+- **`kindLabel` is new.** The subclass identity is queryable on-chain
+  via `kindLabel()` and is fixed at deploy time. The UI conditions on
+  it for everything that varies by subclass — most critically the
+  bottom-action-row buttons in Phase 3, but also the detail-page tab
+  list (a Manual vault has no bounty history; a Keeper vault may show
+  one). The field is *not* derived from `vaultState` and is
+  independent of lifecycle.
+
+- **`swapStatus` retains its name from the SPEC-0003a draft.**
+  Despite the name, the field gates both swap and settle actions: in
+  Case 1 (`NoSwapNeeded`) the UI surfaces the Settle button; in
+  Cases 2/3 (`Executable`) the Swap button. The four enum values map
+  onto the SPEC-0003b/c case-classification status without
+  re-encoding.
+
+- **`swapQuote` and `settleQuote` are split.** The earlier single
+  `swapQuote` covered both swap (Cases 2/3) and settle (Case 1) via
+  a polymorphic shape. Splitting into two typed quotes matches the
+  SPEC's two view methods (`vault.quoteSwap(liquidity)` and
+  `vault.quoteSettle(liquidity)`), simplifies the UI's tab-rendering
+  logic, and lets the indexer cache them separately. Both cache the
+  full-close projection (`liquidity = currentLiquidity`); the UI
+  re-fetches with a smaller `liquidity` parameter when the user
+  dials a partial close.
+
+- **`pendingBps` and `effectiveBps` are dropped.** The new contract
+  has no `partialUnstakeBps` storage. Close fraction is per-call via
+  the `liquidity` parameter on `swap`/`settle`/`executeSwap`/
+  `executeSettle`. Nothing persists between calls.
+
+- **`currentLiquidity` is renamed from `wrappedNftLiquidity`.** Same
+  on-chain source, but the new name reflects that it is a current
+  value that decrements with partial closes — not just an
+  active-vs-burned indicator.
+
+- **`lifetimeBountyPaid` is new and Keeper-specific.** Only
+  meaningful for `kindLabel == 'keeper-staking-vault-v1'`. It tracks
+  the cumulative quote-value of bounty surrendered via
+  `executeSettle` Case-1 calls, valued at `P_settle` of each event.
+  This is **not** PnL — the owner's `realizedPnl` and
+  `collectedYield` are unaffected by the bounty (the owner-side
+  floor `(B, Q + T)` is preserved). It is metadata, useful for the
+  user's introspection into "what did I trade away for the
+  permissionless-Case-1 guarantee?". The field is `0` for Manual
+  vaults and stays `0` over keeper-swap and owner-side paths.
+
+**Stale-quote handling.** `swapQuote` and `settleQuote` change
+block-by-block as `sqrtPriceX96` moves and as fees accrue. The cached
+values in `state` are only as fresh as the last refresh. Before any
+user-initiated settlement action (the "Execute Swap" / "Execute
+Settle" buttons in the detail tabs), the UI must re-fetch the quote
+directly from RPC and reconcile with the cached value. If the drift
+exceeds a tolerated band, prompt the user to reconfirm — analogous
+to the existing slippage-protection pattern on NFT close orders.
+
+**Wrapped-NFT internals deliberately excluded.** The
+`feeGrowthInside*X128` checkpoints, `tokensOwed*` snapshot, and
+tick-level fee-growth fields are implementation details of how
+`currentValue` and `unclaimedYield` are computed. The vault user does
+not see them: by design, the wrapper hides UV3 internals so the user
+sees a single quote-valued yield number, not a four-component fee
+picture. Power users who want the on-chain detail can use a block
+explorer.
 
 ## 2.3 PnL decomposition
 
@@ -532,14 +579,30 @@ funding, no interest stream).
 
 ### Event taxonomy
 
-Five new `EventType` values, prefixed `STAKING_*` (analogous to
-`VAULT_*` for vault shares).
+Five `EventType` values, prefixed `STAKING_*`:
+
+| EventType | Source on-chain event(s) | Subclass scope |
+|---|---|---|
+| `STAKING_DEPOSIT` | `Stake` (initial mint), `IncreaseStake` (top-up) | all |
+| `STAKING_DISPOSE` | `Swap` (owner-side or `executeSwap`), `Settle` (owner-side or `executeSettle`) | all |
+| `STAKING_UNSTAKE` | `Unstake` | all |
+| `STAKING_CLAIM_REWARDS` | `ClaimRewards` | all |
+| `STAKING_CHANGE_CONFIG` | `YieldTargetChanged` | all |
+
+`STAKING_DISPOSE` is a single `EventType` covering all four
+settlement paths, discriminated via `config.disposalKind`. The four
+values are `'owner-swap'`, `'owner-settle'`, `'keeper-swap'`,
+`'keeper-settle'`. Discriminating in `config` rather than via four
+separate `EventType` values keeps the ledger event taxonomy stable
+and keeps consumers (journal-posting, reconciliation, APR) able to
+treat all disposals uniformly except where the subtle kind-specific
+rules below apply.
 
 #### `STAKING_DEPOSIT`
 
 Owner stakes — initial stake or top-up. Same delta pattern in both
 cases; the distinction lives in NPM mechanics (mint vs.
-increaseLiquidity), not in accounting.
+`increaseLiquidity`), not in accounting.
 
 | Field | Value |
 |---|---|
@@ -550,30 +613,89 @@ increaseLiquidity), not in accounting.
 | `deltaLiquidity` | `+addedLiquidity` (UV3 L units) |
 | `tokenValue` | equals `deltaCostBasis` |
 | `rewards` | `[]` |
-| `config` | `{ baseConsumed, quoteConsumed, baseRefunded, quoteRefunded, sqrtPriceX96 }` |
+| `config` | `{ depositKind: 'initial' \| 'increase', baseConsumed, quoteConsumed, baseRefunded, quoteRefunded, sqrtPriceX96, newStakedBase, newStakedQuote, newYieldTarget }` |
+
+The `newStakedBase`, `newStakedQuote`, `newYieldTarget` fields
+capture the post-call slot values. For `depositKind == 'increase'`,
+`newYieldTarget` reflects the auto-scaled `T` per RFC-0003 §6.2:
+`T_new = ceil(T_old × (Q + ΔQ) / Q)`. The auto-scaling is captured
+inside the `STAKING_DEPOSIT` event itself; no separate
+`STAKING_CHANGE_CONFIG` is emitted for it (only owner-explicit
+`setYieldTarget` produces that event).
 
 #### `STAKING_DISPOSE`
 
-A disposal — `swap()` (permissionless or owner-self-execute, identical
-accounting) or `flashClose()`. One event per disposal.
+A disposal — one of four paths discriminated by `config.disposalKind`.
+The framework deltas are computed identically across all four;
+disposalKind-specific behaviour lives entirely in the journal-posting
+rule (§Account mapping) and in `state.lifetimeBountyPaid` updates
+(`keeper-settle` only).
+
+**Common config fields (all disposalKinds):**
+
+```
+{
+  disposalKind: 'owner-swap' | 'owner-settle' | 'keeper-swap' | 'keeper-settle',
+  caller: address,                       // msg.sender of the underlying call
+  liquidityClosed: bigint,               // L delta closed in this disposal
+  liquidityRemainingBefore: bigint,      // L before the close (for frac derivation)
+  principalPayoutBase: bigint,           // (B × frac) credited to unstakeBufferBase
+  principalPayoutQuote: bigint,          // (Q × frac) credited to unstakeBufferQuote
+  rewardFillBase: bigint,                // increment to rewardBufferBase
+  rewardFillQuote: bigint,               // increment to rewardBufferQuote
+  sqrtPriceX96: bigint
+}
+```
+
+The Case 1/2/3 distinction is fully recoverable from `disposalKind`
+plus (for swap variants) the `tokenIn` field in the disposalKind-
+specific addendum: Case 2 has `tokenIn == quoteToken` (base is the
+surplus), Case 3 has `tokenIn == baseToken` (quote is the surplus),
+and Case 1 paths (`owner-settle`, `keeper-settle`) have no
+`tokenIn` because no trade occurs. No separate case-code field is
+needed in the config payload.
+
+**disposalKind-specific config additions:**
+
+- `'owner-swap'` and `'keeper-swap'` (Cases 2/3 only):
+  - `tokenIn: address` (the deficit token the counterparty supplied)
+  - `amountIn: bigint` (the amount supplied)
+- `'keeper-settle'` (Case 1 only):
+  - `bountyRecipient: address`
+  - `bountyBase: bigint` (the surplus base routed direct to recipient)
+  - `bountyQuote: bigint` (the surplus quote routed direct to recipient)
+
+**Framework deltas (uniform across disposalKinds):**
 
 | Field | Value |
 |---|---|
-| `deltaCostBasis` | `−(costBasisBefore × bps / 10000)` |
-| `deltaPnl` | `principalPayoutValue − proportionalCostBasis − flashLoanFee` |
-| `deltaCollectedYield` | `+rewardFillValue` (recognition at disposal) |
+| `deltaCostBasis` | `−(costBasisBefore × liquidityClosed / liquidityRemainingBefore)` (proportional disposal) |
+| `deltaPnl` | `principalPayoutValue − proportionalCostBasis` where `principalPayoutValue = principalPayoutBase × P_settle + principalPayoutQuote` and `proportionalCostBasis = costBasisBefore × liquidityClosed / liquidityRemainingBefore` |
+| `deltaCollectedYield` | see kind-specific table below |
 | `deltaRealizedCashflow` | `0` |
-| `deltaLiquidity` | `−removedLiquidity` |
-| `tokenValue` | `0` (no movement to owner; tokens move into the buffers) |
+| `deltaLiquidity` | `−liquidityClosed` |
+| `tokenValue` | `0` (no movement to owner; tokens move into buffers or to bounty recipient) |
 | `rewards` | `[]` |
-| `config` | `{ bps, disposalKind: 'swap' \| 'flashClose', executor, principalPayoutBase, principalPayoutQuote, rewardFillBase, rewardFillQuote, sqrtPriceX96, flashLoanFee }` |
 
-`principalPayoutValue = principalPayoutBase × P_settle + principalPayoutQuote`. `rewardFillValue = rewardFillBase × P_settle + rewardFillQuote`. `flashLoanFee == 0` unless `disposalKind == 'flashClose'`. The `executor` field captures the `msg.sender` of the underlying call, which lets the UI distinguish self-executed from third-party-executed disposals; on `flashClose` it is always the owner.
+**`deltaCollectedYield` per disposalKind:**
+
+| disposalKind | `deltaCollectedYield` | Rationale |
+|---|---|---|
+| `owner-swap` | `(rewardFillBase × P_settle + rewardFillQuote) − amountInValue` | The owner provides `amountIn` from their own wallet; that capital cycles back to them via `claimRewards` and is **not yield**. Subtract it from the buffer fill to recognise only pool-intrinsic yield. `amountInValue = amountIn` if `tokenIn == quoteToken`, else `amountIn × P_settle`. |
+| `owner-settle` | `rewardFillBase × P_settle + rewardFillQuote` | Case 1: no counterparty trade, `amountIn = 0`, the entire reward fill is pool-intrinsic yield. |
+| `keeper-swap` | `rewardFillBase × P_settle + rewardFillQuote` | The keeper's `amountIn` is sourced from external markets via their callback; it represents LVR substance flowing into the vault. Counts entirely as yield. (Pending verification against SPEC-0003c's exact callback semantics — see §2.5.) |
+| `keeper-settle` | `rewardFillBase × P_settle + rewardFillQuote` (= `T` × `P_settle`-quote-conversion, since the buffer fills with exactly `(0, T)` per RFC-0003 §9) | The bounty `(bountyBase, bountyQuote)` flows direct to recipient and never enters the vault buffers; only the `T`-portion enters reward buffer and is recognised as yield. |
+
+Note that for `keeper-settle`, `rewardFillBase = 0` and
+`rewardFillQuote = T × frac` (full close: `frac = 1`), so the
+formula simplifies to `T` (in quote units). The bounty's quote-value
+is recorded separately in `config.bountyBase`/`bountyQuote` and
+aggregated into `state.lifetimeBountyPaid` for transparency, but it
+does not enter `realizedPnl` or `collectedYield`.
 
 #### `STAKING_UNSTAKE`
 
-Drain of `unstakeBuffer*` to the owner. Owner-triggered, or
-auto-emitted inside a `flashClose` transaction.
+Drain of `unstakeBuffer*` to the owner.
 
 | Field | Value |
 |---|---|
@@ -605,9 +727,9 @@ Drain of `rewardBuffer*` to the owner.
 | `rewards` | `[]` |
 | `config` | `{ drainedBase, drainedQuote, sqrtPriceX96 }` |
 
-Marker only — `collectedYield` was incremented at the `STAKING_DISPOSE`
-that filled the reward buffer. `tokenValue` records the actual
-movement to the owner.
+Marker only — `collectedYield` was incremented at the
+`STAKING_DISPOSE` that filled the reward buffer. `tokenValue`
+records the actual movement to the owner.
 
 `rewards: []` is intentional. The `rewards` array is for external
 reward-token programmes; the vault's intrinsic yield is in token0/
@@ -615,9 +737,14 @@ token1 amounts and is not a separate reward-token category.
 
 #### `STAKING_CHANGE_CONFIG`
 
-Owner-intent change — `setYieldTarget`, `setPartialUnstakeBps`, or
-`increasePartialUnstakeBps`. Neutral in all financial dimensions, but
-ledger-visible for audit trail and history-tab display.
+Owner-intent change. In the new contract surface, the only
+owner-intent change that does not produce a `STAKING_DEPOSIT` is
+`setYieldTarget`. (Top-up via `increaseStake` produces
+`STAKING_DEPOSIT` with `depositKind == 'increase'`, which already
+records the auto-scaled `T`.)
+
+Neutral in all financial dimensions, but ledger-visible for audit
+trail and history-tab display.
 
 | Field | Value |
 |---|---|
@@ -628,17 +755,17 @@ ledger-visible for audit trail and history-tab display.
 | `deltaLiquidity` | `0` |
 | `tokenValue` | `0` |
 | `rewards` | `[]` |
-| `config` | `{ action: 'setYieldTarget' \| 'setPartialUnstakeBps' \| 'increasePartialUnstakeBps', oldValue, newValue }` |
+| `config` | `{ action: 'setYieldTarget', oldValue: bigint, newValue: bigint }` |
 
 The journal-posting rule produces no `JournalEntry` for this event;
 it is purely a marker.
 
 ### Account mapping
 
-The journal-posting rule (`UniswapV3StakingVaultPostJournalEntriesRule`)
-maps each non-marker event to a single journal entry containing all
-required lines. The chart of accounts adds four new accounts to the
-existing schema:
+The journal-posting rule
+(`UniswapV3StakingVaultPostJournalEntriesRule`) maps each non-marker
+event to a single journal entry containing all required lines. The
+chart of accounts adds four new accounts to the existing schema:
 
 | Code | Account | Class | Normal side | Purpose |
 |---|---|---|---|---|
@@ -647,7 +774,9 @@ existing schema:
 | 2000 | Pending Settlement | Liability | Credit | Obligation to owner for buffered tokens, at disposal value |
 | 4400 | Realized Yield | Revenue | Credit | Yield recognised at disposal |
 
-Existing accounts in use: `3000 Contributed Capital`, `3100 Capital Returned`, `4100 Realized Gains`, `4300 FX Gain / Loss`, `5000 Realized Losses`.
+Existing accounts in use: `3000 Contributed Capital`,
+`3100 Capital Returned`, `4100 Realized Gains`,
+`4300 FX Gain / Loss`, `5000 Realized Losses`.
 
 The `2xxx` Liability class is new in the chart of accounts. Account
 codes are suggestions; final assignment is the implementation phase's
@@ -661,65 +790,77 @@ DR 1010 Staking Position at Cost   V
 CR 3000 Contributed Capital        V
 ```
 
-Identical to the existing NFT/Vault-Share acquisition pattern.
+Identical to the existing NFT/Vault-Share acquisition pattern. Same
+posting for both `depositKind == 'initial'` and
+`depositKind == 'increase'`.
 
-#### `STAKING_DISPOSE` (profitable)
+#### `STAKING_DISPOSE` — base posting
+
+For all disposalKinds, define:
+- `principalPayoutValue = principalPayoutBase × P_settle + principalPayoutQuote`
+- `rewardFillValue = rewardFillBase × P_settle + rewardFillQuote`
+- `proportionalCostBasis = costBasisBefore × liquidityClosed / liquidityRemainingBefore`
+- `realizedYield = deltaCollectedYield` per the kind-specific table above
+
+The base journal entry for a profitable disposal:
 
 ```
-DR 3100 Capital Returned          principalPayout + rewardFill
-DR 1020 Position Cash Holdings    principalPayout + rewardFill
+DR 3100 Capital Returned          principalPayoutValue + realizedYield
+DR 1020 Position Cash Holdings    principalPayoutValue + realizedYield
 CR 1010 Staking Position at Cost  proportionalCostBasis
-CR 4100 Realized Gains            principalPayout − proportionalCostBasis
-CR 4400 Realized Yield            rewardFill
-CR 2000 Pending Settlement        principalPayout + rewardFill
+CR 4100 Realized Gains            principalPayoutValue − proportionalCostBasis
+CR 4400 Realized Yield            realizedYield
+CR 2000 Pending Settlement        principalPayoutValue + realizedYield
 ```
 
-A single journal entry combining two effects. The first set of lines
-(Capital Returned, Staking Position at Cost reduction, Realized Gains,
-Realized Yield) follows the existing NFT/Vault-Share disposal pattern:
-equity is reclassified from active capital to returned capital, the
-cost basis is removed, gains and yield are recognised. The other two
-lines (Position Cash Holdings, Pending Settlement) record the buffer
-creation: tokens enter the vault's cash holdings as an asset, balanced
-by a liability to the owner.
+For loss-making disposals, replace the `CR 4100 Realized Gains` line
+with `DR 5000 Realized Losses |principalPayoutValue −
+proportionalCostBasis|`.
 
-Balance check: DR `2 × (principalPayout + rewardFill)` equals CR
-`proportionalCostBasis + (principalPayout − proportionalCostBasis) +
-rewardFill + (principalPayout + rewardFill) = 2 × (principalPayout +
-rewardFill)`. ✓
+Balance check (profitable variant): DR `2 × (principalPayoutValue +
+realizedYield)` equals CR `proportionalCostBasis +
+(principalPayoutValue − proportionalCostBasis) + realizedYield +
+(principalPayoutValue + realizedYield) = 2 × (principalPayoutValue +
+realizedYield)`. ✓
 
-#### `STAKING_DISPOSE` (loss-making)
+#### `STAKING_DISPOSE` — disposalKind-specific addenda
 
-```
-DR 3100 Capital Returned          principalPayout + rewardFill
-DR 1020 Position Cash Holdings    principalPayout + rewardFill
-DR 5000 Realized Losses           |principalPayout − proportionalCostBasis|
-CR 1010 Staking Position at Cost  proportionalCostBasis
-CR 4400 Realized Yield            rewardFill
-CR 2000 Pending Settlement        principalPayout + rewardFill
-```
+**`disposalKind == 'owner-swap'`: amountIn-cycling addendum.**
 
-Identical structure to the profitable variant, with `Realized Losses`
-on the debit side instead of `Realized Gains` on the credit side.
-
-#### `STAKING_DISPOSE` with non-zero `flashLoanFee`
-
-If the on-chain pipeline can extract `flashLoanFee` separately (a
-Phase 5 question — on-chain events do not directly emit this value;
-the pipeline would need to parse provider-specific events from
-Aave/Balancer/Morpho or compute the fee via token-difference on the
-flash-loan helper contract), an additional pair of lines is appended:
+The owner's `amountIn` enters the vault as additional cash and
+becomes part of the reward buffer (and thus the future
+`claimRewards` drain). It is not yield. Append the following lines
+to the base entry:
 
 ```
-DR 5000 Realized Losses           flashLoanFee
-CR 3100 Capital Returned          flashLoanFee
+DR 1020 Position Cash Holdings    amountInValue
+CR 2000 Pending Settlement        amountInValue
 ```
 
-If extraction is not feasible, the fee is implicit in a smaller
-`principalPayout` and subsumed in `Realized Gains` / `Realized Losses`.
-This is a pipeline-availability decision, not a concept-level
-decision; the journal-posting rule will conditionally include or omit
-these lines based on whether `config.flashLoanFee > 0`.
+This pair is balanced and PnL-neutral; it tracks the cash-cycling
+through the vault without recognising it as income.
+
+The buffer-tracking invariant becomes
+`1020 == 2000 == principalPayoutValue + realizedYield +
+amountInValue` for owner-swap dispositions, where `realizedYield`
+excludes `amountInValue` per §2.3 framework deltas.
+
+**`disposalKind == 'owner-settle'`, `'keeper-swap'`: no addendum.**
+
+Base entry is complete. (`keeper-swap` `amountIn` is treated as
+yield and is already inside `realizedYield = rewardFillValue`.)
+
+**`disposalKind == 'keeper-settle'`: no addendum to the journal.**
+
+The bounty `(bountyBase, bountyQuote)` flows direct from the vault
+to a non-owner recipient and never enters Position Cash Holdings,
+Pending Settlement, or Realized Yield. From the owner's accounting
+perspective, the bounty is invisible. The base entry, with
+`rewardFillValue == T` and `realizedYield == T`, is correct as-is.
+
+The bounty is tracked in the position's `state.lifetimeBountyPaid`
+metadata (per §2.2) for user introspection but does not produce any
+journal lines in the owner's ledger.
 
 #### `STAKING_UNSTAKE` (drained value `V`)
 
@@ -728,14 +869,14 @@ DR 2000 Pending Settlement        V
 CR 1020 Position Cash Holdings    V
 ```
 
-Pure asset/liability movement. The drained value `V` equals the value
-originally booked into Pending Settlement at the disposal — no
+Pure asset/liability movement. The drained value `V` equals the
+value originally booked into Pending Settlement at the disposal — no
 revaluation occurs at drain time. Any FX drift on the base component
 between disposal and drain is visible only via the position's
 `unrealizedPnl` (the live mark-to-market of the buffer at pool price
 vs. its booked value at disposal). It does not produce a separate
-realised PnL line at drain; if not yet drained, the drift folds into
-the next disposal's `Realized Gains` / `Realized Losses`.
+realised PnL line at drain; if not yet drained, the drift folds
+into the next disposal's `Realized Gains` / `Realized Losses`.
 
 #### `STAKING_CLAIM_REWARDS` (drained value `V`)
 
@@ -749,6 +890,13 @@ slice of `Pending Settlement`. Yield was already recognised as
 `Realized Yield` at the prior `STAKING_DISPOSE`; the drain is a pure
 asset/liability movement.
 
+For owner-swap dispositions, this is also where the `amountIn`
+capital cycling completes its round trip: the
+`amountIn` portion of the reward buffer is drained back to the owner
+along with the actual yield. Both flow through the same journal
+mechanism; the distinction between "cycling" and "yield" was made at
+the disposal event and does not need to be replayed at drain.
+
 #### `STAKING_CHANGE_CONFIG`
 
 No journal entry. Marker only.
@@ -761,14 +909,19 @@ invariants:
 - **Cost-basis invariant.** `1010 Staking Position at Cost` balance
   equals `Position.costBasis`. The primary check that
   deposit/disposal cost-basis movements are consistent.
-- **Buffer-tracking invariant.** `1020 Position Cash Holdings` balance
-  equals `2000 Pending Settlement` balance, both equal to the booked
-  value of all four buffer slots (`unstakeBufferBase × P_settle +
-  unstakeBufferQuote + rewardBufferBase × P_settle + rewardBufferQuote`,
-  where `P_settle` is the pool price at the disposal that filled each
-  buffer component). Note: this is the *booked* value, not the
-  current pool-price-marked value, since neither account is revalued
-  at drain.
+- **Buffer-tracking invariant.** `1020 Position Cash Holdings`
+  balance equals `2000 Pending Settlement` balance, both equal to
+  the booked value of all four buffer slots (`unstakeBufferBase ×
+  P_settle + unstakeBufferQuote + rewardBufferBase × P_settle +
+  rewardBufferQuote`, where `P_settle` is the pool price at the
+  disposal that filled each buffer component). Note: this is the
+  *booked* value, not the current pool-price-marked value, since
+  neither account is revalued at drain.
+
+  For owner-swap dispositions, the `amountInValue` portion is
+  included in both 1020 and 2000 (per the addendum lines), so the
+  invariant `1020 == 2000 == buffer-booked-value` holds without
+  modification.
 
 A mismatch on either signals a missed event or a misposted event.
 
@@ -776,6 +929,22 @@ A mismatch on either signals a missed event or a misposted event.
 
 Existing routing key family is reused: `position.liquidity.uniswapv3-staking-vault.<eventType>` with `eventType ∈ {deposit, dispose, unstake, claim_rewards, change_config}`. Existing payload shape (positionId, eventId, eventType, blockNumber, txHash, plus event-specific config) suffices — no payload extensions, no new exchange. Per the new guide §2.4, no deviation conditions apply.
 
+The `dispose` routing key fans out to consumers regardless of
+`config.disposalKind`; consumers that need kind-specific handling
+(e.g., the `lifetimeBountyPaid` aggregator that reacts only to
+`keeper-settle`) read `config.disposalKind` from the payload.
+
 ## 2.5 Computation as code (deferred)
 
 Per guide §2.5, the metric derivation rules are locked in TypeScript under `packages/midcurve-shared/src/metrics/uniswapv3-staking-vault/` (`common-metrics.ts` + `specific-metrics.ts`). This is a build artefact, not a concept artefact, and is produced as a separate implementation issue against the build phases — not as part of this concept document.
+
+One Phase-2 question is left open for the build phase to confirm:
+the precise callback semantics of `executeSwap` in `KeeperStakingVault`
+(SPEC-0003c) determine whether the keeper's `amountIn` is
+unambiguously external value (and thus yield) or whether part of it
+returns to the keeper via flash-style mechanics. The §2.3 rule
+("`keeper-swap` `amountIn` is yield") is the working assumption based
+on the buffer-table reading of RFC-0003 §9; the build phase verifies
+it against the SPEC-0003c contract behaviour and adjusts the
+`deltaCollectedYield` formula for `keeper-swap` if the final reading
+diverges.
