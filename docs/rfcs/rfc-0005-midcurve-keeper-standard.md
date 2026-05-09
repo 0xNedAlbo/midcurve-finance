@@ -89,15 +89,15 @@ where indicated by the Quote.
                                  │
                                  │ events / view calls
                                  ▼
-       ┌─────────────────────────┴───────────────────────────┐
-       │                                                     │
-       ▼                                                     ▼
+       ┌─────────────────────────┴─────────────────────────┐
+       │                                                   │
+       ▼                                                   ▼
 ┌─────────────┐                                    ┌──────────────┐
-│   Maker     │ ◄──── quote* (view) ───────────    │  Taker Bot   │
+│   Maker     │ ◄──── quote* (view) ─────────────  │  Taker Bot   │
 │  Contract   │                                    │              │
-│             │ ◄──── fill* (state-changing) ───   │  + Taker     │
+│             │ ◄──── fill* (state-changing) ───── │  + Taker     │
 │  pushes,    │                                    │    Contract  │
-│  callbacks, │ ───── on*Fill (callback) ──────►   │              │
+│  callbacks, │ ──── on*Fill (callback) ─────────► │              │
 │  verifies   │                                    │  pulls funds,│
 └─────────────┘                                    │  performs    │
                                                    │  swap, etc.  │
@@ -333,6 +333,13 @@ Bounty. Each has a Maker-side interface (offering and fulfilling)
 and a Taker-side callback interface (receiving and responding).
 A Maker MAY implement any subset of the three.
 
+The interfaces in this section are **single-quote** interfaces: each
+exposes at most one active Quote at a time. Makers that genuinely
+have multiple parallel offers of the same Order Type instead use the
+**book variants** defined in §7. The two patterns coexist; a Maker
+can implement either or both of single-quote and book interfaces of
+the same Order Type.
+
 ### 6.1 SellLimit
 
 The Maker offers a fixed quantity of `sellToken` for sale, requiring
@@ -350,6 +357,8 @@ struct SellLimitQuote {
     uint256    minSellRemainder;
     address    buyToken;
     uint256    minBuyAmount;
+    uint256    quoteValidUntil;
+    bytes      extraData;
 }
 ```
 
@@ -366,6 +375,11 @@ struct SellLimitQuote {
   MUST either consume `sellAmount` exactly, or leave at least
   `minSellRemainder` of `sellToken` unsold. Set `minSellRemainder = 0`
   to allow any partial size.
+- `quoteValidUntil` is a Maker-supplied polling hint expressing the
+  Unix timestamp (seconds) until which the Quote is expected to
+  remain valid. See §6.5 for full semantics.
+- `extraData` is an opaque, Maker-defined informational field. See
+  §6.4 for full semantics.
 
 #### Maker Interface
 
@@ -412,24 +426,24 @@ Maker validates:
   Require q.state == QUOTE_AVAILABLE
   Require sellAmount > 0
   Require sellAmount <= q.sellAmount
-
+  
   Determine partial fill regime:
     if sellAmount < q.sellAmount:
       Require q.allowPartials is true
       Compute remainder = q.sellAmount - sellAmount
       Require remainder == 0 OR remainder >= q.minSellRemainder
-
+  
   Compute requiredBuyAmount:
     requiredBuyAmount = mulDiv(sellAmount, q.minBuyAmount, q.sellAmount)
     (linear scaling; uses safe full-precision multiply-divide)
-
+  
   Require requiredBuyAmount <= maxBuyAmount
     (Taker-side slippage check)
 
 Maker prepares:
   Perform any internal state preparation needed to make sellAmount of
   sellToken available (e.g., partially close a UV3 position).
-
+  
   Snapshot: balanceBefore = IERC20(buyToken).balanceOf(address(this))
 
 Maker pushes:
@@ -506,6 +520,8 @@ struct BuyLimitQuote {
     uint256    minBuyRemainder;
     address    sellToken;
     uint256    maxSellAmount;
+    uint256    quoteValidUntil;
+    bytes      extraData;
 }
 ```
 
@@ -516,6 +532,11 @@ struct BuyLimitQuote {
   for partial fills.
 - `allowPartials` and `minBuyRemainder` are analogous to the SellLimit
   versions, but reference the `buyAmount` axis.
+- `quoteValidUntil` is a Maker-supplied polling hint expressing the
+  Unix timestamp (seconds) until which the Quote is expected to
+  remain valid. See §6.5 for full semantics.
+- `extraData` is an opaque, Maker-defined informational field. See
+  §6.4 for full semantics.
 
 #### Maker Interface
 
@@ -562,17 +583,17 @@ Maker validates:
   Require q.state == QUOTE_AVAILABLE
   Require buyAmount > 0
   Require buyAmount <= q.buyAmount
-
+  
   Partial fill regime:
     if buyAmount < q.buyAmount:
       Require q.allowPartials is true
       Compute remainder = q.buyAmount - buyAmount
       Require remainder == 0 OR remainder >= q.minBuyRemainder
-
+  
   Compute pushedSellAmount:
     pushedSellAmount = mulDiv(buyAmount, q.maxSellAmount, q.buyAmount)
     (linear scaling)
-
+  
   Require pushedSellAmount >= minSellAmount
     (Taker-side slippage check: Taker wants at least this much working
      capital; reverts if Maker's quote has degraded since polling)
@@ -580,7 +601,7 @@ Maker validates:
 Maker prepares:
   Perform any internal state preparation needed to make pushedSellAmount
   of sellToken available.
-
+  
   Snapshot:
     buyTokenBefore  = IERC20(buyToken).balanceOf(address(this))
     sellTokenBefore = IERC20(sellToken).balanceOf(address(this))
@@ -602,10 +623,10 @@ After callback returns, Maker verifies:
   Require buyTokenReceived == buyAmount
     (EXACT match; the Maker explicitly does not want more buyToken than
      ordered, because that implies it spent more sellToken than necessary.)
-
+  
   sellTokenAfter = IERC20(sellToken).balanceOf(address(this))
   sellTokenSpent = sellTokenBefore - sellTokenAfter
-
+  
   (sellTokenSpent <= pushedSellAmount; the difference is the unused
    working capital the Taker returned. The Maker SHOULD reconcile any
    refunded sellToken back into its internal accounting.)
@@ -658,6 +679,8 @@ struct BountyQuote {
     address    bountyToken;
     uint256    bountyAmount;
     bytes      makerCalldata;
+    uint256    quoteValidUntil;
+    bytes      extraData;
 }
 ```
 
@@ -668,6 +691,12 @@ struct BountyQuote {
   data that is passed through unchanged. Common uses include
   task-specification (which compound to call, which buffer to drain,
   etc.) but the field MAY also be empty bytes.
+- `quoteValidUntil` is a Maker-supplied polling hint expressing the
+  Unix timestamp (seconds) until which the Quote is expected to
+  remain valid. See §6.5 for full semantics.
+- `extraData` is an opaque, Maker-defined informational field, distinct
+  from `makerCalldata` in that it is not passed back to the Maker on
+  fill. See §6.4 for full semantics.
 
 #### Maker Interface
 
@@ -711,7 +740,7 @@ Maker validates:
   Read current quote q via internal logic equivalent to quoteBounty()
   Require q.state == QUOTE_AVAILABLE
   Require q.bountyAmount >= minBountyAmount
-
+  
   Maker MAY perform additional checks against makerCalldata as part of
   the standard pattern: e.g., verifying that makerCalldata matches the
   current task specification, or ignoring it entirely if the Maker does
@@ -735,14 +764,14 @@ Maker calls back:
 After callback returns, Maker verifies:
   Maker performs whatever post-conditions it requires.
   These are Maker-defined and not part of the standard.
-
+  
   Examples:
     - For a compound bounty: verify the underlying position has been
       compounded (state delta on the position contract).
     - For a buffer drain: verify the buffer state has been zeroed.
     - For a notification bounty: no verification required; payment is
       unconditional once the call is made.
-
+  
   If verification fails, the Maker MUST revert.
 
 Maker registers the fill internally and returns:
@@ -764,15 +793,15 @@ Inputs from Maker:
 Taker:
   The Taker MUST validate that this callback corresponds to a fill
   it initiated.
-
+  
   The Taker performs whatever work the bounty requires, which is
   defined off-chain. The Taker is expected to know — through Maker
   documentation, prior agreement, or interpretation of makerCalldata —
   what the Maker's verification logic will check.
-
+  
   The Taker keeps the bountyAmountSent (no return transfer is required
   by the standard).
-
+  
   The Taker returns normally if the work is done; it MAY revert if it
   detects an error in the work or in its own preconditions.
 
@@ -782,9 +811,467 @@ Taker Bots cannot serve arbitrary Bounty Makers without prior
 knowledge of the specific Maker's task scheme.
 ```
 
+### 6.4 `extraData` — informational Maker context
+
+All three Quote structs include a final `extraData` field of type
+`bytes`. The semantics are uniform across order types:
+
+- **Maker-defined.** The Maker chooses what to put in this field, and
+  in what format. Common uses include position identifiers, vault type
+  tags, strategy names, version markers, or links to off-chain
+  metadata. The standard does not impose any structure.
+
+- **Informational only.** The Taker reads `extraData` and MAY use it
+  for profitability evaluation, routing decisions, filtering, or any
+  other purpose. The standard does not require the Taker to act on
+  `extraData` in any specific way.
+
+- **Not bound to fill execution.** `extraData` is NOT a fill argument
+  and is NOT passed back to the Maker through `fill*`. It is also NOT
+  forwarded into the Taker callback by the Maker. If the Taker needs
+  `extraData` available inside the callback, the Taker copies it from
+  the Quote into the `callbackData` argument when calling `fill*`.
+
+- **Not part of quote consistency.** A Maker MAY change `extraData`
+  between a Taker's quote observation and the subsequent fill without
+  affecting the validity of the fill. The standard does not enforce
+  consistency on this field.
+
+- **MAY be empty.** Makers that have no contextual information to
+  publish set `extraData = bytes("")`. Taker Bots MUST tolerate empty
+  `extraData`.
+
+Distinction from `makerCalldata` (Bounty only): `makerCalldata` is
+returned by the Taker to the Maker on fill and may participate in the
+Maker's task-verification logic. `extraData` is read-only context
+that flows from Maker to Taker and never returns. A Bounty Maker uses
+`makerCalldata` for task specification (binding) and `extraData` for
+context (informational).
+
+#### 6.4.1 Schema-typed extraData (informational)
+
+A common idiom is for a family of related Makers to use `extraData`
+to communicate structured, family-specific information to specialised
+Takers. This works as follows:
+
+- The Maker family agrees on a schema (e.g., a struct layout) and a
+  schema identifier (e.g., a `bytes32` constant such as
+  `keccak256("midcurve-sltp-v1")`).
+- Each Maker in the family encodes its `extraData` with the schema
+  identifier as the first field, followed by the schema-specific
+  payload.
+- Specialised Taker Bots that know the schema can decode `extraData`
+  to enable optimisations such as: skipping `quote*()` calls when
+  trigger conditions are not met, batching multiple Makers that
+  share a common data source (e.g., the same UniswapV3 pool), or
+  filtering Makers by family-specific criteria.
+- Generic Taker Bots that do not know the schema simply ignore
+  `extraData` and treat each Maker uniformly.
+
+The standard does not define any specific schemas. Schema definitions
+are off-chain agreements between Maker families and their associated
+Takers.
+
+### 6.5 `quoteValidUntil` — polling hint
+
+All three Quote structs include a `quoteValidUntil` field of type
+`uint256`. Its semantics are uniform across order types:
+
+- **Unix timestamp in seconds.** The value is a Unix timestamp,
+  identical in format to `block.timestamp` and to the `deadline`
+  argument of `fill*` functions. A Maker computes it as
+  `block.timestamp + N` where `N` is the desired validity window in
+  seconds.
+
+- **Polling hint, not enforcement.** `quoteValidUntil` is informational
+  guidance from the Maker to the Taker. It signals the Maker's
+  expectation of when the Quote will need to be refreshed. The Maker
+  MUST NOT enforce this value in any `fill*` function; the only
+  durable time bound on a fill is the `deadline` argument supplied by
+  the Taker. A Maker MAY return new Quote values before the previous
+  `quoteValidUntil` elapses; this is normal and not a protocol
+  violation.
+
+- **`quoteValidUntil = 0` means "no hint".** A Maker that has no
+  preference about polling frequency sets the value to `0`. The Taker
+  treats this as the absence of a hint and polls according to its
+  own strategy.
+
+- **Maximum effective horizon: 28 days.** Taker Bots MUST poll any
+  active Maker at least once every 28 days regardless of
+  `quoteValidUntil`. A Taker treats Maker-supplied values larger than
+  `block.timestamp + 28 days` as if they were exactly
+  `block.timestamp + 28 days`. Concretely, the effective polling
+  deadline a Taker applies is:
+
+  ```
+  effectiveValidUntil = min(
+      quote.quoteValidUntil > 0 ? quote.quoteValidUntil : type(uint256).max,
+      now + 28 days
+  )
+  ```
+
+  This bound ensures that no Maker can become invisible by claiming
+  indefinite validity. 28 days = 2,419,200 seconds.
+
+- **Taker MAY poll earlier.** Nothing in the standard prevents a
+  Taker from polling more frequently than `quoteValidUntil` suggests.
+  Hints are upper bounds on Taker patience, not lower bounds.
+
+A typical use case: a Maker holding a stable position that updates its
+Quote only on owner action might set `quoteValidUntil = block.timestamp
++ 7 days` to reduce unnecessary polling traffic. A Maker computing
+its Quote off a fast-moving spot price might set
+`quoteValidUntil = block.timestamp + 30` (i.e., 30 seconds ahead) to
+signal that the Quote will likely be stale soon.
+
 ---
 
-## 7. Maker Implementation Requirements
+## 7. Book Variants — Multiple Parallel Offers
+
+The Maker interfaces defined in §6 are **single-quote** interfaces:
+each interface offers at most one active Quote at any time. The
+**book variants** defined in this section serve Makers that genuinely
+have multiple parallel offers of the same Order Type — for example, a
+market-making contract publishing quotes at multiple price points, or
+a vault holding several positions that can be settled independently.
+
+A Book Maker exposes multiple parallel offers of the same Order Type
+but performs no matching: Takers choose which offer to fill by
+referencing its `quoteId`. Each Book interface is a strict superset
+of the corresponding single-quote interface in expressive power; a
+single-quote Maker is conceptually a Book Maker with at most one
+offer. Nevertheless, single-quote and book interfaces are defined
+separately and coexist as equally valid patterns. Choose the simpler
+single-quote interface when at most one offer is needed; choose the
+book interface when genuine parallelism is required.
+
+A Maker MAY implement both the single-quote and the book interface
+of the same Order Type in one contract, exposing the same data via
+two access shapes. Generic Taker Bots benefit from the single-quote
+view; specialised Bots benefit from the richer book view.
+
+### 7.1 BookSellLimit
+
+#### Offer
+
+```solidity
+struct SellLimitOffer {
+    uint256    quoteId;
+    address    sellToken;
+    uint256    sellAmount;
+    bool       allowPartials;
+    uint256    minSellRemainder;
+    address    buyToken;
+    uint256    minBuyAmount;
+    uint256    quoteValidUntil;
+    bytes      extraData;
+}
+```
+
+The fields are identical in semantics to those of `SellLimitQuote`
+(§6.1), with the addition of `quoteId`. Each offer in a book carries
+its own `quoteValidUntil` and `extraData` independent of the others.
+
+#### Quote
+
+```solidity
+struct BookSellLimitQuote {
+    QuoteState state;
+    SellLimitOffer[] offers;
+}
+```
+
+- When `state == QUOTE_AVAILABLE`, `offers` contains one or more
+  concrete offers. Every offer in the array is independently
+  fillable; the Maker MUST NOT return offers that cannot currently
+  be filled.
+- When `state == NO_QUOTE`, `offers` is empty.
+- When `state == TERMINATED`, `offers` is empty and the Maker will
+  never again return `QUOTE_AVAILABLE` from this interface.
+
+The `quoteId` of each offer MUST be unique within the same returned
+array. Quote-IDs MAY be reused across time: a Maker MAY return the
+same `quoteId` repeatedly across polling cycles to reference the same
+underlying offer, even as the offer's other parameters change.
+
+#### Maker Interface
+
+```solidity
+interface IBookSellLimitMaker {
+    function quoteBookSellLimit() external view returns (BookSellLimitQuote memory);
+
+    function fillBookSellLimit(
+        uint256 quoteId,
+        uint256 sellAmount,
+        uint256 maxBuyAmount,
+        bytes calldata callbackData,
+        uint256 deadline
+    ) external returns (uint256 buyAmountReceived);
+}
+```
+
+#### Taker Callback Interface
+
+```solidity
+interface IBookSellLimitTaker {
+    function onFillBookSellLimit(
+        uint256 quoteId,
+        address sellToken,
+        uint256 sellAmountSent,
+        address buyToken,
+        uint256 minBuyAmountRequired,
+        bytes calldata callbackData
+    ) external;
+}
+```
+
+#### Behaviour of `fillBookSellLimit`
+
+```
+Inputs from caller:
+  quoteId:       references the specific offer to fill
+  sellAmount:    quantity of sellToken the Taker wants to take
+  maxBuyAmount:  Taker-side slippage bound
+  callbackData:  opaque blob
+  deadline:      Unix timestamp
+
+Maker validates:
+  Require block.timestamp <= deadline
+  Read current book b via internal logic equivalent to quoteBookSellLimit()
+  Require b.state == QUOTE_AVAILABLE
+  
+  Locate offer with matching quoteId in b.offers
+    Revert if not found ("UnknownQuoteId")
+    Let o = the matching offer
+  
+  Apply the same per-offer validation as fillSellLimit (§6.1):
+    sellAmount <= o.sellAmount
+    Partial-fill regime checks against o.allowPartials, o.minSellRemainder
+    Linear-scaled requiredBuyAmount = mulDiv(sellAmount, o.minBuyAmount, o.sellAmount)
+    requiredBuyAmount <= maxBuyAmount
+
+The Maker proceeds with the same push-callback-verify pattern as
+fillSellLimit (§6.1), with the callback dispatched as:
+
+  IBookSellLimitTaker(msg.sender).onFillBookSellLimit(
+      quoteId,
+      o.sellToken,
+      sellAmount,
+      o.buyToken,
+      requiredBuyAmount,
+      callbackData
+  )
+
+After callback, Maker verifies received >= requiredBuyAmount
+(same semantics as §6.1) and returns the received amount.
+
+Filling one offer in a book MUST NOT affect the validity or
+parameters of other offers in the same book, except where the Maker's
+internal state genuinely couples them (e.g., shared inventory).
+```
+
+### 7.2 BookBuyLimit
+
+#### Offer
+
+```solidity
+struct BuyLimitOffer {
+    uint256    quoteId;
+    address    buyToken;
+    uint256    buyAmount;
+    bool       allowPartials;
+    uint256    minBuyRemainder;
+    address    sellToken;
+    uint256    maxSellAmount;
+    uint256    quoteValidUntil;
+    bytes      extraData;
+}
+```
+
+Fields identical in semantics to `BuyLimitQuote` (§6.2) plus `quoteId`.
+
+#### Quote
+
+```solidity
+struct BookBuyLimitQuote {
+    QuoteState state;
+    BuyLimitOffer[] offers;
+}
+```
+
+Same uniqueness and lifecycle constraints as `BookSellLimitQuote`
+(§7.1).
+
+#### Maker Interface
+
+```solidity
+interface IBookBuyLimitMaker {
+    function quoteBookBuyLimit() external view returns (BookBuyLimitQuote memory);
+
+    function fillBookBuyLimit(
+        uint256 quoteId,
+        uint256 buyAmount,
+        uint256 minSellAmount,
+        bytes calldata callbackData,
+        uint256 deadline
+    ) external returns (uint256 sellAmountSpent);
+}
+```
+
+#### Taker Callback Interface
+
+```solidity
+interface IBookBuyLimitTaker {
+    function onFillBookBuyLimit(
+        uint256 quoteId,
+        address sellToken,
+        uint256 maxSellAmountSent,
+        address buyToken,
+        uint256 exactBuyAmountRequired,
+        bytes calldata callbackData
+    ) external;
+}
+```
+
+#### Behaviour of `fillBookBuyLimit`
+
+Identical to `fillBuyLimit` (§6.2), with the addition that the Maker
+locates the offer by `quoteId` before validation, and the callback is
+dispatched as:
+
+```
+IBookBuyLimitTaker(msg.sender).onFillBookBuyLimit(
+    quoteId,
+    o.sellToken,
+    pushedSellAmount,
+    o.buyToken,
+    buyAmount,
+    callbackData
+)
+```
+
+The exact-match verification (`buyTokenReceived == buyAmount`) and
+the sellToken-refund accounting are identical to §6.2.
+
+### 7.3 BookBounty
+
+#### Offer
+
+```solidity
+struct BountyOffer {
+    uint256    quoteId;
+    address    bountyToken;
+    uint256    bountyAmount;
+    bytes      makerCalldata;
+    uint256    quoteValidUntil;
+    bytes      extraData;
+}
+```
+
+Fields identical in semantics to `BountyQuote` (§6.3) plus `quoteId`.
+
+#### Quote
+
+```solidity
+struct BookBountyQuote {
+    QuoteState state;
+    BountyOffer[] offers;
+}
+```
+
+Same uniqueness and lifecycle constraints as `BookSellLimitQuote`
+(§7.1).
+
+#### Maker Interface
+
+```solidity
+interface IBookBountyMaker {
+    function quoteBookBounty() external view returns (BookBountyQuote memory);
+
+    function fillBookBounty(
+        uint256 quoteId,
+        uint256 minBountyAmount,
+        bytes calldata makerCalldata,
+        bytes calldata takerCalldata,
+        uint256 deadline
+    ) external returns (uint256 bountyPaid);
+}
+```
+
+#### Taker Callback Interface
+
+```solidity
+interface IBookBountyTaker {
+    function onFillBookBounty(
+        uint256 quoteId,
+        address bountyToken,
+        uint256 bountyAmountSent,
+        bytes calldata makerCalldata,
+        bytes calldata takerCalldata
+    ) external;
+}
+```
+
+#### Behaviour of `fillBookBounty`
+
+Identical to `fillBounty` (§6.3), with the addition that the Maker
+locates the offer by `quoteId` before validation. The callback is
+dispatched as:
+
+```
+IBookBountyTaker(msg.sender).onFillBookBounty(
+    quoteId,
+    o.bountyToken,
+    o.bountyAmount,
+    makerCalldata,
+    takerCalldata
+)
+```
+
+Maker-defined post-callback verification semantics are identical to
+§6.3.
+
+### 7.4 ID Stability and Polling Discipline
+
+A Maker MUST guarantee `quoteId` uniqueness **within a single returned
+book**. A Maker MAY but is not required to keep `quoteId` values stable
+across polling cycles. Two cases are typical:
+
+- **Stable IDs:** The Maker uses identifiers derived from durable
+  internal state (e.g., a position-NFT tokenId, a hash of position
+  parameters). The same `quoteId` references the same logical offer
+  across polling cycles, even as Quote parameters evolve. This is
+  the recommended pattern.
+
+- **Volatile IDs:** The Maker generates IDs ad-hoc per quote call
+  (e.g., a sequence counter). IDs do not correspond across calls.
+  Less informative for Takers but valid.
+
+Takers MUST treat `quoteId` as the only stable handle to an offer
+within a book. Indices into the `offers` array are NOT stable: the
+Maker MAY reorder, add, or remove offers between calls. A Taker that
+caches `(maker, indexInArray)` between polling cycles is wrong; only
+`(maker, quoteId)` is meaningful.
+
+When invoking `fill*`, the Taker MUST use the `quoteId` that was
+present in a recent quote response. Calling `fill*` with a `quoteId`
+that does not exist in the current book causes the Maker to revert.
+
+### 7.5 ERC-165 Interface Identifiers
+
+```solidity
+bytes4 constant IBOOK_SELL_LIMIT_MAKER_ID = type(IBookSellLimitMaker).interfaceId;
+bytes4 constant IBOOK_BUY_LIMIT_MAKER_ID  = type(IBookBuyLimitMaker).interfaceId;
+bytes4 constant IBOOK_BOUNTY_MAKER_ID     = type(IBookBountyMaker).interfaceId;
+```
+
+A Book Maker registers these identifiers with the Registry exactly as
+single-quote Makers register their interface identifiers (§5).
+
+---
+
+## 8. Maker Implementation Requirements
 
 A compliant Maker Contract MUST:
 
@@ -818,27 +1305,56 @@ A compliant Maker Contract MUST:
   exists because excess `buyToken` implies the Maker overspent
   `sellToken`.
 
+- **M-09.** MUST NOT enforce `quoteValidUntil` in any `fill*` function.
+  The only durable time bound on a fill is the `deadline` argument
+  supplied by the Taker. A Maker MAY return a Quote whose
+  `quoteValidUntil` has already elapsed; the Taker decides whether to
+  fill anyway.
+
+- **M-15.** For Book interfaces (§7): every offer in a returned book
+  MUST have a `quoteId` unique within that book. Calling a `fill*`
+  function with a `quoteId` not present in the current book MUST
+  revert.
+
+- **M-16.** For Book interfaces (§7): each offer in a returned book
+  MUST be independently fillable. A Maker MUST NOT return offers in
+  the book that cannot currently be filled at the listed parameters.
+
 A compliant Maker Contract SHOULD:
 
-- **M-09.** Register itself with the Registry shortly after deployment,
+- **M-10.** Register itself with the Registry shortly after deployment,
   and deregister itself before becoming permanently inactive.
 
-- **M-10.** Emit the corresponding `TERMINATED` quote response when an
+- **M-11.** Emit the corresponding `TERMINATED` quote response when an
   order type is permanently disabled, even if the Maker remains active
   on other order types.
 
+- **M-17.** For Book interfaces (§7): use stable `quoteId` values that
+  reference the same logical offer across polling cycles, even as the
+  offer's parameters change. This enables Takers to track offers
+  reliably over time.
+
 A compliant Maker Contract MAY:
 
-- **M-11.** Implement multiple Maker interfaces in a single contract,
+- **M-12.** Implement multiple Maker interfaces in a single contract,
   declaring all of them at registration time.
 
-- **M-12.** Use Maker-internal pricing logic (oracles, TWAPs, internal
+- **M-13.** Use Maker-internal pricing logic (oracles, TWAPs, internal
   state-derived limits) to dynamically compute Quote parameters. Such
   logic is invisible to the standard; the Quote itself is what counts.
 
+- **M-14.** Set `quoteValidUntil = 0` in any Quote where the Maker
+  has no opinion about polling frequency.
+
+- **M-18.** Implement both the single-quote interface (§6) and the
+  corresponding book interface (§7) of the same Order Type, exposing
+  the same underlying offer(s) through both. Generic Takers benefit
+  from the simpler single-quote view; specialised Takers benefit
+  from the richer book view.
+
 ---
 
-## 8. Taker Bot Requirements
+## 9. Taker Bot Requirements
 
 A compliant Taker Bot MUST:
 
@@ -868,40 +1384,56 @@ A compliant Taker Bot MUST:
   current block timestamp plus a small buffer) on every `fill*` call
   to limit the time window during which the transaction can execute.
 
+- **T-06.** Poll any active Maker at least once every 28 days,
+  regardless of `quoteValidUntil`. Maker-supplied values exceeding
+  `block.timestamp + 28 days` MUST be treated as if they were exactly
+  `block.timestamp + 28 days`. This ensures no Maker can become
+  invisible by claiming indefinite validity.
+
+- **T-14.** When filling against a Book Maker (§7), use the
+  `quoteId` returned in a recent quote response as the only stable
+  reference to an offer. Do NOT cache offers by their position in
+  the `offers` array; the Maker MAY reorder, add, or remove offers
+  between calls. Only `(maker, quoteId)` is a meaningful handle.
+
 A compliant Taker Bot SHOULD:
 
-- **T-06.** Subscribe to Registry events (`MakerRegistered`,
+- **T-07.** Subscribe to Registry events (`MakerRegistered`,
   `MakerDeregistered`, `InterfacesUpdated`) for its target chain(s)
   and maintain a local list of active Makers based on these events.
 
-- **T-07.** Validate each newly-discovered Maker by calling each of
+- **T-08.** Validate each newly-discovered Maker by calling each of
   its declared `quote*` functions once and verifying the response is
   well-formed (decode succeeds, token addresses are non-zero, amounts
   are nonzero where required, etc.) before adding it to the active
   polling list.
 
-- **T-08.** Maintain a persistent blacklist of Maker addresses that
+- **T-09.** Maintain a persistent blacklist of Maker addresses that
   failed validation, and decline to re-validate them unless the Bot
   operator explicitly resets the blacklist.
 
+- **T-10.** Respect `quoteValidUntil` (when non-zero) as guidance for
+  scheduling the next poll of a given Maker. Polling earlier than
+  `quoteValidUntil` is permitted but typically wasteful.
+
 A compliant Taker Bot MAY:
 
-- **T-09.** Use any polling cadence, profitability evaluation logic,
+- **T-11.** Use any polling cadence, profitability evaluation logic,
   capital sourcing strategy (own inventory, flash loans, market
   swaps), and execution mechanism (private mempool, public mempool,
   bundling) it sees fit. None of these are constrained by the
   standard.
 
-- **T-10.** Restrict its operation to a curated subset of Makers
+- **T-12.** Restrict its operation to a curated subset of Makers
   (e.g., a Midcurve-maintained allowlist, an audit-based filter, etc.)
   rather than serving every registered Maker.
 
-- **T-11.** Operate across multiple chains, each with its own Registry
+- **T-13.** Operate across multiple chains, each with its own Registry
   deployment.
 
 ---
 
-## 9. Registry Deployment
+## 10. Registry Deployment
 
 The Registry contract is deployed once per supported chain. Deployment
 addresses for each chain are published in the public Midcurve
@@ -914,7 +1446,7 @@ admin functions, no paused state, and no ownership.
 
 ---
 
-## 10. Conformance Checklist
+## 11. Conformance Checklist
 
 A Maker Contract is conformant if and only if it satisfies all of the
 following:
@@ -925,8 +1457,11 @@ following:
 - [ ] M-04: validates `deadline` in every `fill*`
 - [ ] M-05: reentrancy-guards every `fill*`
 - [ ] M-06: reverts on every quote precondition failure in `fill*`
-- [ ] M-07: enforces `received >= requiredBuyAmount` in `fillSellLimit`
-- [ ] M-08: enforces `buyTokenReceived == buyAmount` in `fillBuyLimit`
+- [ ] M-07: enforces `received >= requiredBuyAmount` in `fillSellLimit` (and `fillBookSellLimit`)
+- [ ] M-08: enforces `buyTokenReceived == buyAmount` in `fillBuyLimit` (and `fillBookBuyLimit`)
+- [ ] M-09: does NOT enforce `quoteValidUntil` in any `fill*`
+- [ ] M-15: For Book interfaces — `quoteId` unique within a book; reverts on unknown ID
+- [ ] M-16: For Book interfaces — every offer in the book is independently fillable
 
 A Taker Bot is conformant if and only if it satisfies all of the
 following:
@@ -936,10 +1471,12 @@ following:
 - [ ] T-03: validates every callback as belonging to its own fill
 - [ ] T-04: uses slippage bounds on every `fill*`
 - [ ] T-05: uses near-future `deadline` on every `fill*`
+- [ ] T-06: polls every active Maker at least once every 28 days, capping `quoteValidUntil`
+- [ ] T-14: For Book interfaces — uses `quoteId` (not array position) as the stable offer reference
 
 ---
 
-## 11. Out of Scope
+## 12. Out of Scope
 
 This standard does not specify, and implementations are free to choose
 any approach for:
@@ -965,7 +1502,10 @@ any approach for:
 
 ---
 
-## 12. Glossary
+## 13. Glossary
+
+**Book** — A collection of multiple parallel offers of the same
+Order Type, exposed by a single Maker via the Book Variants (§7).
 
 **ERC-165** — Ethereum interface detection standard.
 `supportsInterface(bytes4)` returns `true` if a contract supports a
@@ -976,20 +1516,54 @@ transaction.
 
 **Maker / Maker Contract** — The smart contract publishing offers.
 
+**Offer** — A single concrete proposal within a book Quote, identified
+by its `quoteId`.
+
 **Order Type** — One of: SellLimit, BuyLimit, Bounty.
 
 **Push-callback-verify** — The settlement pattern where the Maker
 pushes tokens out, calls into the Taker, and verifies the result via
 balance delta.
 
-**Quote** — The data returned by a Maker's quote function, describing
-the current state of one Order Type.
+**Quote** — The data returned by a Maker's quote function. For
+single-quote interfaces, the Quote describes the current state of
+one Order Type. For book interfaces, the Quote contains a list of
+offers.
+
+**quoteId** — The stable identifier used in book interfaces to
+reference one specific offer within a book.
 
 **Registry** — The permissionless on-chain directory of registered
 Makers.
 
 **Taker / Taker Bot** — The actor calling Maker fill functions,
 typically off-chain software with an on-chain helper.
+
+---
+
+## 14. Future Extensions
+
+The standard is designed for forward-compatibility. The following
+Maker-interface families are anticipated as future additions and
+their naming conventions are reserved:
+
+- **`IBatch*Maker`** — atomic execution of multiple orders from a
+  single Maker. The Maker offers a bundle of related orders that
+  MUST be filled together or not at all. Use cases include
+  Maker-defined order baskets where the constituent orders are
+  economically interdependent.
+
+- **`IBasket*Maker`** — single order trading a basket of multiple
+  `sellTokens` against one `buyToken` (or vice versa). The full
+  basket is exchanged as a unit. Use cases include portfolio-level
+  rebalancing or multi-token settlement of complex positions.
+
+Extensions follow the additive-interface principle: existing
+single-quote and book interfaces remain unchanged when new interface
+families are introduced. A Maker MAY implement any combination of
+single-quote, book, batch, and basket interfaces in a single contract.
+Each new interface family is registered with the Registry through its
+own ERC-165 interface identifier.
 
 ---
 
