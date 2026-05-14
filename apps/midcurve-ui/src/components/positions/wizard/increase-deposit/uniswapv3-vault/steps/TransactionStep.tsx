@@ -5,6 +5,7 @@ import { getAddress } from 'viem';
 import type {
   PoolSearchTokenInfo,
   UniswapV3VaultPositionConfigResponse,
+  UniswapV3VaultPositionStateResponse,
 } from '@midcurve/api-shared';
 import { getTokenAmountsFromLiquidity } from '@midcurve/shared';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -35,6 +36,7 @@ export function TransactionStep() {
   const position = state.position;
   const pool = position?.pool;
   const config = position?.config as UniswapV3VaultPositionConfigResponse | undefined;
+  const vaultState = position?.state as UniswapV3VaultPositionStateResponse | undefined;
   const poolChainId = config?.chainId ?? 1;
   const chainSlug = getChainSlugByChainId(poolChainId);
   const isWrongNetwork = isConnected && walletChainId !== poolChainId;
@@ -161,11 +163,22 @@ export function TransactionStep() {
   // adjustedAmounts already returns { token0Amount, token1Amount } in token0/token1 order,
   // so cappedToken0/cappedToken1 are already in the correct order for the vault mint.
 
+  // Derive expectedShares from the current adjustedLiquidity, not the Configure-step
+  // value: the contract mints shares 1:1 with NFPM addedLiquidity, and adjustedLiquidity
+  // reflects the live pool price. Using a stale value causes minShares to exceed what
+  // NFPM can mint after price drift and reverts with "Slippage: insufficient shares".
+  const expectedShares = useMemo(() => {
+    if (!vaultState || !priceAdjustmentReady) return 0n;
+    const adjL = BigInt(priceAdjustment.adjustedLiquidity || '0');
+    if (adjL === 0n) return 0n;
+    const vaultLiquidity = BigInt(vaultState.liquidity);
+    const totalSupply = BigInt(vaultState.totalSupply);
+    return vaultLiquidity === 0n ? adjL : (totalSupply * adjL) / vaultLiquidity;
+  }, [vaultState, priceAdjustmentReady, priceAdjustment.adjustedLiquidity]);
+
   const vaultMintParams = useMemo(() => {
     if (!config || !allApprovalsDone || !priceAdjustmentReady || !vaultAddress) return null;
     if (cappedToken0 === 0n && cappedToken1 === 0n) return null;
-
-    const expectedShares = BigInt(state.expectedShares || '0');
     if (expectedShares === 0n) return null;
 
     return {
@@ -176,7 +189,7 @@ export function TransactionStep() {
       expectedShares,
       slippageBps: 50,
     };
-  }, [config, allApprovalsDone, priceAdjustmentReady, vaultAddress, cappedToken0, cappedToken1, poolChainId, state.expectedShares]);
+  }, [config, allApprovalsDone, priceAdjustmentReady, vaultAddress, cappedToken0, cappedToken1, poolChainId, expectedShares]);
 
   const vaultMint = useVaultMint(vaultMintParams);
 
