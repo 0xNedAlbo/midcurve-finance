@@ -23,6 +23,13 @@ export interface UseCreateVaultResult {
   isWaitingForConfirmation: boolean;
   isSuccess: boolean;
   vaultAddress: Address | null;
+  /**
+   * Block number the createVault tx was mined in. Available once the backend
+   * tx-status subscriber reports confirmation. Pass this to the discover call
+   * so the API can pin its reads to this block and wait for its RPC pool to
+   * reach it before reading the just-deployed vault.
+   */
+  blockNumber: bigint | undefined;
   txHash: Hash | undefined;
   error: Error | null;
   reset: () => void;
@@ -128,8 +135,9 @@ export function useCreateVault({
     isWaitingForConfirmation,
     isSuccess,
     vaultAddress,
+    blockNumber: txWatch.blockNumber,
     txHash,
     error,
     reset,
-  }), [createVault, isCreating, isWaitingForConfirmation, isSuccess, vaultAddress, txHash, error, reset]);
+  }), [createVault, isCreating, isWaitingForConfirmation, isSuccess, vaultAddress, txWatch.blockNumber, txHash, error, reset]);
 }

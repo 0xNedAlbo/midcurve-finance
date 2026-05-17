@@ -30,6 +30,13 @@ const DiscoverVaultRequestSchema = z.object({
   chainId: z.number().int().positive(),
   vaultAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
   shareOwnerAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+  // Block number at which the vault was created (from the createVault tx
+  // receipt). Sent as a decimal string to survive JSON without precision loss.
+  // When present, the service pins reads to this block and waits for the RPC
+  // head to reach it before issuing them — mitigates the LB race where the
+  // receipt is visible on one backend node but the just-deployed bytecode
+  // isn't yet visible on the one serving our reads.
+  atBlock: z.string().regex(/^\d+$/).optional(),
 });
 
 export async function OPTIONS(request: NextRequest): Promise<Response> {
@@ -56,7 +63,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       });
     }
 
-    const { chainId, vaultAddress, shareOwnerAddress } = validation.data;
+    const { chainId, vaultAddress, shareOwnerAddress, atBlock } = validation.data;
 
     try {
       const position = await getUniswapV3VaultPositionService().discover(
@@ -65,6 +72,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           chainId,
           vaultAddress,
           ownerAddress: shareOwnerAddress,
+          atBlock: atBlock !== undefined ? BigInt(atBlock) : undefined,
         },
       );
 
@@ -90,6 +98,18 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
 
       const message = error instanceof Error ? error.message : String(error);
+
+      if (message.startsWith('RPC_LAG')) {
+        const errorResponse = createErrorResponse(
+          ApiErrorCode.BAD_REQUEST,
+          'Blockchain node has not yet caught up to the vault creation block. Please retry in a moment.',
+          message,
+        );
+        apiLog.requestEnd(apiLogger, requestId, 503, Date.now() - startTime);
+        return NextResponse.json(errorResponse, {
+          status: 503,
+        });
+      }
 
       if (message.startsWith('INVALID_VAULT_CONTRACT')) {
         const errorResponse = createErrorResponse(

@@ -242,6 +242,48 @@ export class UniswapV3VaultPositionService {
     // DISCOVER
     // ============================================================================
 
+    /**
+     * Block-height wait used to mitigate the RPC load-balancing race during
+     * vault discovery: the createVault tx receipt may be visible on one backend
+     * node behind the RPC endpoint while another node in the same pool — the
+     * one our reads will hit — has not yet caught up. We poll the RPC's head
+     * until it reports having reached `targetBlock`, then proceed.
+     *
+     * Same-RPC pool consistency is not guaranteed after this returns (different
+     * requests can still land on different backends), but in practice once one
+     * sampled node has crossed the target block the rest of the pool catches
+     * up within a few hundred milliseconds. The caller pairs this with a single
+     * retry to cover residual jitter.
+     */
+    private async waitForBlock(
+        client: PublicClient,
+        targetBlock: bigint,
+        chainId: number,
+        vaultAddress: string,
+    ): Promise<void> {
+        const POLL_INTERVAL_MS = 250;
+        const TIMEOUT_MS = 5_000;
+        const startedAt = Date.now();
+        let lastSeen: bigint | null = null;
+        while (true) {
+            try {
+                lastSeen = await client.getBlockNumber();
+                if (lastSeen >= targetBlock) return;
+            } catch (err) {
+                this.logger.warn(
+                    { chainId, vaultAddress, err: err instanceof Error ? err.message : String(err) },
+                    'getBlockNumber failed while waiting for block; will retry',
+                );
+            }
+            if (Date.now() - startedAt >= TIMEOUT_MS) {
+                throw new Error(
+                    `RPC_LAG: Timed out after ${TIMEOUT_MS}ms waiting for block ${targetBlock.toString()} on chain ${chainId} (last seen: ${lastSeen?.toString() ?? 'n/a'})`,
+                );
+            }
+            await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+        }
+    }
+
     async discover(
         userId: string,
         params: {
@@ -249,10 +291,19 @@ export class UniswapV3VaultPositionService {
             vaultAddress: string;
             ownerAddress: string;
             quoteTokenAddress?: string;
+            /**
+             * Block number at which the vault was created (from the createVault tx
+             * receipt). When provided, the on-chain reads below are pinned to this
+             * block and the RPC is polled until it reports a head >= atBlock — this
+             * eliminates the load-balanced RPC race where the receipt is visible on
+             * one backend node but the just-deployed bytecode isn't yet visible on
+             * the node serving our reads.
+             */
+            atBlock?: bigint;
         },
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3VaultPosition> {
-        const { chainId, ownerAddress } = params;
+        const { chainId, ownerAddress, atBlock } = params;
         const vaultAddress = normalizeAddress(params.vaultAddress);
 
         // Check for existing position
@@ -264,39 +315,64 @@ export class UniswapV3VaultPositionService {
 
         const client = this._evmConfig.getPublicClient(chainId);
 
-        // Read vault contract state in parallel
-        let token0Addr: string, token1Addr: string, tokenId: bigint, poolAddr: string,
-            tickLower: number, tickUpper: number, vaultDecimals: number, positionManagerAddr: string;
-        try {
-            [token0Addr, token1Addr, tokenId, poolAddr, tickLower, tickUpper, vaultDecimals, positionManagerAddr] =
-                await Promise.all([
-                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'token0' }),
-                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'token1' }),
-                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tokenId' }),
-                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'pool' }),
-                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tickLower' }),
-                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tickUpper' }),
-                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'decimals' }),
-                    client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'positionManager' }),
-                ]) as [string, string, bigint, string, number, number, number, string];
-        } catch {
-            throw new Error(`INVALID_VAULT_CONTRACT: The address ${vaultAddress} is not a valid vault contract on chain ${chainId}`);
+        // If the caller pinned a block, wait until the RPC reports having reached
+        // it before issuing the reads. Different load-balanced backends behind a
+        // single RPC endpoint can be at different heights; this turns the
+        // "node-behind" race into a deterministic wait.
+        if (atBlock !== undefined) {
+            await this.waitForBlock(client, atBlock, chainId, vaultAddress);
         }
 
-        // Read user state + operator
+        const blockOpt = atBlock !== undefined ? { blockNumber: atBlock } : {};
+
+        // Read vault contract state in parallel. One retry on failure as a cheap
+        // safety net for the case where the head sample (above) hit a node ahead
+        // of the one serving a particular read in the batch.
+        let token0Addr: string, token1Addr: string, tokenId: bigint, poolAddr: string,
+            tickLower: number, tickUpper: number, vaultDecimals: number, positionManagerAddr: string;
+        const readVaultMetadata = () => Promise.all([
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'token0', ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'token1', ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tokenId', ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'pool', ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tickLower', ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'tickUpper', ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'decimals', ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'positionManager', ...blockOpt }),
+        ]) as Promise<[string, string, bigint, string, number, number, number, string]>;
+        try {
+            [token0Addr, token1Addr, tokenId, poolAddr, tickLower, tickUpper, vaultDecimals, positionManagerAddr] =
+                await readVaultMetadata();
+        } catch (firstError) {
+            this.logger.warn(
+                { chainId, vaultAddress, atBlock: atBlock?.toString(), err: firstError instanceof Error ? firstError.message : String(firstError) },
+                'Vault metadata read failed, retrying once',
+            );
+            await new Promise(resolve => setTimeout(resolve, 250));
+            try {
+                [token0Addr, token1Addr, tokenId, poolAddr, tickLower, tickUpper, vaultDecimals, positionManagerAddr] =
+                    await readVaultMetadata();
+            } catch (retryError) {
+                const cause = retryError instanceof Error ? retryError.message : String(retryError);
+                throw new Error(`INVALID_VAULT_CONTRACT: Could not read vault metadata at ${vaultAddress} on chain ${chainId}: ${cause}`);
+            }
+        }
+
+        // Read user state + operator (pinned to atBlock if provided)
         const [sharesBalance, totalSupply, claimable, operatorAddr] = await Promise.all([
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [ownerAddress as Address] }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply' }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableYield', args: [ownerAddress as Address] }),
-            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'operator' }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'balanceOf', args: [ownerAddress as Address], ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'totalSupply', ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'claimableYield', args: [ownerAddress as Address], ...blockOpt }),
+            client.readContract({ address: vaultAddress as Address, abi: UniswapV3VaultAbi, functionName: 'operator', ...blockOpt }),
         ]) as [bigint, bigint, readonly bigint[], string];
 
-        // Read liquidity from NFPM
+        // Read liquidity from NFPM (pinned to atBlock if provided)
         const positionData = await client.readContract({
             address: positionManagerAddr as Address,
             abi: UNISWAP_V3_POSITION_MANAGER_ABI,
             functionName: 'positions',
             args: [tokenId],
+            ...blockOpt,
         }) as readonly [bigint, string, string, string, number, number, number, bigint, bigint, bigint, bigint, bigint];
         const liquidity = positionData[7];
         const fee = positionData[4] as number;

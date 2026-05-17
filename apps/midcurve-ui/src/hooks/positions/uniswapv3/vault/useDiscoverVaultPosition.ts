@@ -14,6 +14,12 @@ interface DiscoverVaultParams {
   chainId: number;
   vaultAddress: string;
   shareOwnerAddress: string;
+  /**
+   * Block number the createVault tx was mined in. Sent as a decimal string to
+   * avoid JSON precision loss. The API uses it to pin contract reads and to
+   * wait for its RPC pool to reach that block before reading.
+   */
+  atBlock?: bigint;
 }
 
 interface DiscoverVaultResponse {
@@ -26,11 +32,16 @@ export function useDiscoverVaultPosition() {
 
   return useMutation({
     mutationFn: async (params: DiscoverVaultParams) => {
+      const { atBlock, ...rest } = params;
+      const body = {
+        ...rest,
+        ...(atBlock !== undefined ? { atBlock: atBlock.toString() } : {}),
+      };
       return apiClientFn<DiscoverVaultResponse>(
         '/api/v1/positions/uniswapv3-vault/discover',
         {
           method: 'POST',
-          body: JSON.stringify(params),
+          body: JSON.stringify(body),
         },
       );
     },

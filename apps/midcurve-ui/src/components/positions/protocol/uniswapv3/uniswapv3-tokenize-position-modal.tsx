@@ -156,7 +156,12 @@ export function UniswapV3TokenizePositionModal({
     if (createVault.isSuccess && createVault.vaultAddress && connectedAddress && discoverStatus === 'idle') {
       setDiscoverStatus('active');
       discoverVault.mutate(
-        { chainId, vaultAddress: createVault.vaultAddress, shareOwnerAddress: connectedAddress },
+        {
+          chainId,
+          vaultAddress: createVault.vaultAddress,
+          shareOwnerAddress: connectedAddress,
+          atBlock: createVault.blockNumber,
+        },
         {
           onSuccess: () => {
             setDiscoverStatus('success');
@@ -167,7 +172,7 @@ export function UniswapV3TokenizePositionModal({
         },
       );
     }
-  }, [createVault.isSuccess, createVault.vaultAddress, discoverStatus, chainId, connectedAddress, discoverVault]);
+  }, [createVault.isSuccess, createVault.vaultAddress, createVault.blockNumber, discoverStatus, chainId, connectedAddress, discoverVault]);
 
   // Reset state when modal opens
   useEffect(() => {
