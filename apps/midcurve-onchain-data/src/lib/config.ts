@@ -140,7 +140,14 @@ export interface CatchUpConfig {
   enabled: boolean;
   /** Maximum blocks per getLogs request (default: 10000, eth_getLogs provider limit) */
   batchSizeBlocks: number;
-  /** Block tracking heartbeat interval in milliseconds (default: 60000) */
+  /**
+   * How often the persisted close-order cursor is re-written from the pollers'
+   * scanned watermark, in milliseconds (default: 60000).
+   *
+   * The heartbeat never advances the cursor past what was scanned, so this only
+   * controls how quickly a failed cursor write is repaired — not how much of
+   * the chain gets skipped.
+   */
   heartbeatIntervalMs: number;
 }
 

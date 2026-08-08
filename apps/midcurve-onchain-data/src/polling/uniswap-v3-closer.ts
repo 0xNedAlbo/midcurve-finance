@@ -44,11 +44,21 @@ export interface CloserContractInfo {
  * on a single chain using eth_getLogs.
  */
 export class UniswapV3CloserPollingBatch {
-  private readonly chainId: number;
+  public readonly chainId: number;
   private readonly contractAddresses: string[];
   private pollTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
   private lastProcessedBlock: bigint | null = null;
+
+  /**
+   * Whether a poll cycle has actually scanned a range on this batch.
+   *
+   * `lastProcessedBlock` is seeded from the chain head when the cache holds no
+   * cursor (see `start()`), and at that moment nothing has been scanned. The
+   * flag separates "this is where we start looking" from "this is what we have
+   * looked at", so the heartbeat can only ever persist the latter.
+   */
+  private hasCompletedScan = false;
 
   constructor(chainId: number, contracts: CloserContractInfo[]) {
     this.chainId = chainId;
@@ -113,6 +123,19 @@ export class UniswapV3CloserPollingBatch {
     this.isRunning = false;
 
     log.info({ chainId: this.chainId, msg: 'Stopped close order polling' });
+  }
+
+  /**
+   * Highest block this batch has actually scanned and published, or null if no
+   * poll cycle has completed yet.
+   *
+   * This is the only value safe to persist as the restart cursor: everything up
+   * to it has been through `eth_getLogs`. Returns null rather than the seeded
+   * chain head so a caller cannot mistake "where polling began" for "what has
+   * been scanned".
+   */
+  getLastScannedBlock(): bigint | null {
+    return this.hasCompletedScan ? this.lastProcessedBlock : null;
   }
 
   /**
@@ -189,8 +212,11 @@ export class UniswapV3CloserPollingBatch {
       });
     }
 
-    // Update tracking
+    // Update tracking. The range fromBlock→currentBlock has now been through
+    // eth_getLogs, so it is honest to both advance the watermark and let the
+    // heartbeat persist it.
     this.lastProcessedBlock = currentBlock;
+    this.hasCompletedScan = true;
     await setCloseOrderLastProcessedBlock(this.chainId, currentBlock);
   }
 }
