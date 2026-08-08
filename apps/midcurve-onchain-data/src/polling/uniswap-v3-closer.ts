@@ -157,12 +157,27 @@ export class UniswapV3CloserPollingBatch {
       const mq = getRabbitMQConnection();
       let publishedCount = 0;
 
+      // Per-event isolation: one unusable event must not take the rest of the
+      // batch down with it. Matches the catch-up publishers.
       for (const { event } of events) {
         if (!event) continue;
-        const routingKey = closeOrderRoutingKeyForEvent(event);
-        const content = serializeCloseOrderEvent(event);
-        await mq.publishCloseOrderEvent(routingKey, content);
-        publishedCount++;
+        try {
+          const routingKey = closeOrderRoutingKeyForEvent(event);
+          const content = serializeCloseOrderEvent(event);
+          await mq.publishCloseOrderEvent(routingKey, content);
+          publishedCount++;
+        } catch (error) {
+          log.warn({
+            chainId: this.chainId,
+            eventType: event.type,
+            nftId: event.nftId,
+            vaultAddress: event.vaultAddress,
+            ownerAddress: event.ownerAddress,
+            txHash: event.transactionHash,
+            error: error instanceof Error ? error.message : String(error),
+            msg: 'Failed to publish close order event from poll, skipping',
+          });
+        }
       }
 
       log.info({
