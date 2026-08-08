@@ -114,13 +114,30 @@ import type {
  * autoDelete: false, and still bound to close-order-events with both routing
  * patterns; a topic exchange delivers to every matching binding, so it keeps
  * receiving every close order event with nobody consuming it, and grows until
- * the disk does. Unbind or delete it as part of the deploy:
+ * the disk does.
  *
- *   rabbitmqadmin delete queue name=business-logic.uniswapv3-process-close-order-events
+ * Two phases, in this order. The first is reversible and stops the bleeding;
+ * the second needs a human looking at the queue depth.
  *
- * This is not done from code on purpose: deleting a queue that may still hold
- * unprocessed v1 messages is destructive, and mid-rolling-deploy is the worst
- * moment to decide that.
+ *   1. Unbind — accumulation stops immediately, nothing is lost:
+ *      rabbitmqadmin delete binding source=close-order-events \
+ *        destination=business-logic.uniswapv3-process-close-order-events \
+ *        destination_type=queue properties_key='closer.*.*.*'
+ *      rabbitmqadmin delete binding source=close-order-events \
+ *        destination=business-logic.uniswapv3-process-close-order-events \
+ *        destination_type=queue properties_key='closer.vault.*.*.*'
+ *
+ *   2. Check the depth, then decide:
+ *      rabbitmqadmin list queues name messages
+ *      Empty → delete it. Non-empty → shovel into the v2 queue first, since
+ *      those are real events that were never processed; discarding them is a
+ *      choice, not a cleanup.
+ *      rabbitmqadmin delete queue name=business-logic.uniswapv3-process-close-order-events
+ *
+ * Not done from code on purpose: the unbind would be safe to automate, but
+ * collapsing it together with the delete would hide an irreversible action
+ * behind a reversible one, and mid-rolling-deploy is the worst moment for the
+ * code to decide what happens to unprocessed messages.
  */
 const QUEUE_NAME = 'business-logic.uniswapv3-process-close-order-events.v2';
 
