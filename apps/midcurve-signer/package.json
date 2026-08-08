@@ -11,8 +11,6 @@
     "start": "next start -p 3003",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest",
-    "test:run": "vitest run",
     "test:api": "tsx scripts/test-api.ts"
   },
   "dependencies": {

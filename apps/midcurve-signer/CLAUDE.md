@@ -147,8 +147,8 @@ pnpm dev:pretty
 # Type check
 pnpm typecheck
 
-# Run tests
-pnpm test
+# Smoke-test the running API by hand (not a unit test suite — this app has none)
+pnpm test:api
 ```
 
 ## Security Considerations
