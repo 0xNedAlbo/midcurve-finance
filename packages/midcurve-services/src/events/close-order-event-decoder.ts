@@ -147,6 +147,8 @@ export interface OrderRegisteredPayload {
   slippageBps: number;
   swapDirection: SwapDirectionString;
   swapSlippageBps: number;
+  /** Vault shares covered by the order (vault variant only, bigint as string) */
+  shares?: string;
 }
 
 export interface OrderCancelledPayload {
@@ -161,6 +163,8 @@ export interface OrderExecutedPayload {
   amount0Out: string;
   /** Amount of token1 received (as string for bigint) */
   amount1Out: string;
+  /** Vault shares closed by the execution (vault variant only, bigint as string) */
+  sharesClosed?: string;
 }
 
 export interface OrderOperatorUpdatedPayload {
@@ -473,6 +477,17 @@ export function buildCloseOrderEvent(
 export const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
 
 /**
+ * Dead-letter exchange for close order lifecycle events.
+ *
+ * Consumers bind their queue to this via x-dead-letter-exchange so that a message
+ * no handler can interpret ends up somewhere visible instead of being discarded.
+ */
+export const EXCHANGE_CLOSE_ORDER_EVENTS_DLX = 'close-order-events-dlx';
+
+/** Retention for dead-lettered close order events (7 days) */
+export const CLOSE_ORDER_DLQ_MESSAGE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
  * Build a routing key for close order lifecycle events.
  * NFT format:   closer.{chainId}.{nftId}.{triggerMode}
  * Vault format:  closer.vault.{chainId}.{vaultAddress}.{triggerMode}
@@ -487,6 +502,36 @@ export function buildCloseOrderRoutingKey(
     return `closer.vault.${chainId}.${identifier}.${triggerMode}`;
   }
   return `closer.${chainId}.${identifier}.${triggerMode}`;
+}
+
+/**
+ * Build the routing key for a decoded close order event, picking the NFT or
+ * vault key shape from the event's own identifiers.
+ *
+ * Every publisher (receipt extraction, fallback poller, catch-up) must use this
+ * instead of hand-rolling the key — the NFT-only variants silently dropped every
+ * vault event.
+ *
+ * @throws if the event carries neither an nftId nor a vaultAddress
+ */
+export function closeOrderRoutingKeyForEvent(event: AnyCloseOrderEvent): string {
+  if (event.vaultAddress) {
+    return buildCloseOrderRoutingKey(
+      event.chainId,
+      event.vaultAddress,
+      event.triggerMode,
+      'vault'
+    );
+  }
+
+  if (event.nftId) {
+    return buildCloseOrderRoutingKey(event.chainId, event.nftId, event.triggerMode);
+  }
+
+  throw new Error(
+    `Close order event has neither nftId nor vaultAddress: type=${event.type} ` +
+      `tx=${event.transactionHash} logIndex=${event.logIndex}`
+  );
 }
 
 // ============================================================

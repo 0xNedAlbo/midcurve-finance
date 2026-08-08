@@ -33,6 +33,7 @@ import type { ServiceLogger } from '../../logging/index.js';
 import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 import { EvmConfig } from '../../config/evm.js';
 import { deriveCloseOrderHashFromTick } from '../../utils/automation/close-order-hash.js';
+import { createCloseOrderIdentityHash } from '../../utils/automation/close-order-identity.js';
 import { SharedContractService } from '../automation/shared-contract-service.js';
 import type {
   CreateCloseOrderInput,
@@ -309,10 +310,22 @@ export class UniswapV3CloseOrderService {
               chainId, contractAddress, BigInt(nftId!), triggerMode, blockNumber,
             );
 
-        // Protocol-specific identity hash
+        // Protocol-specific identity hash — shared with the on-chain event rule,
+        // which is the other writer of these rows.
         const orderIdentityHash = isVault
-          ? `uniswapv3-vault/${chainId}/${vaultAddress!.toLowerCase()}/${ownerAddress!.toLowerCase()}/${triggerMode}`
-          : `uniswapv3/${chainId}/${nftId}/${triggerMode}`;
+          ? createCloseOrderIdentityHash({
+              protocol: 'uniswapv3-vault',
+              chainId,
+              vaultAddress: vaultAddress!,
+              ownerAddress: ownerAddress!,
+              triggerMode,
+            })
+          : createCloseOrderIdentityHash({
+              protocol: 'uniswapv3',
+              chainId,
+              nftId: nftId!,
+              triggerMode,
+            });
         const existingOrder = await this.findByOrderIdentityHash(orderIdentityHash, tx);
         const isActive = onChain !== null && onChain.status === OnChainOrderStatus.ACTIVE;
 
@@ -478,6 +491,59 @@ export class UniswapV3CloseOrderService {
       return result;
     } catch (error) {
       log.methodError(this.logger, 'create', error as Error, { input });
+      throw error;
+    }
+  }
+
+  /**
+   * Ensures the identity slot holds exactly this order.
+   *
+   * Registration is not "insert a row", it is "this slot now holds this order" —
+   * so it is expressed as an upsert on the unique orderIdentityHash. Two writers
+   * exist for these rows (the on-chain event rule and refresh()); whichever wins
+   * the race, the slot ends up with the same content instead of one of them
+   * failing on the unique constraint.
+   */
+  async upsertByIdentityHash(
+    input: CreateCloseOrderInput,
+    tx?: PrismaTransactionClient,
+  ): Promise<CloseOrder> {
+    log.methodEntry(this.logger, 'upsertByIdentityHash', {
+      positionId: input.positionId,
+      protocol: input.protocol,
+      orderIdentityHash: input.orderIdentityHash,
+    });
+
+    try {
+      const db = tx ?? this.prisma;
+
+      const mutableFields = {
+        positionId: input.positionId,
+        sharedContractId: input.sharedContractId,
+        closeOrderHash: input.closeOrderHash,
+        automationState: input.automationState ?? 'monitoring',
+        config: input.config as Prisma.InputJsonValue,
+        state: input.state as Prisma.InputJsonValue,
+      };
+
+      const result = await db.closeOrder.upsert({
+        where: { orderIdentityHash: input.orderIdentityHash },
+        create: {
+          protocol: input.protocol,
+          orderIdentityHash: input.orderIdentityHash,
+          ...mutableFields,
+        },
+        update: mutableFields,
+      });
+
+      this.logger.info(
+        { id: result.id, positionId: result.positionId, protocol: result.protocol },
+        'Close order slot ensured',
+      );
+      log.methodExit(this.logger, 'upsertByIdentityHash', { id: result.id });
+      return result;
+    } catch (error) {
+      log.methodError(this.logger, 'upsertByIdentityHash', error as Error, { input });
       throw error;
     }
   }

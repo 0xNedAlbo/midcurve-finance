@@ -195,12 +195,16 @@ export {
   // Functions
   buildCloseOrderEvent,
   buildCloseOrderRoutingKey,
+  closeOrderRoutingKeyForEvent,
   serializeCloseOrderEvent,
   triggerModeToString,
   swapDirectionToString,
   // Constants
   EXCHANGE_CLOSE_ORDER_EVENTS,
+  EXCHANGE_CLOSE_ORDER_EVENTS_DLX,
+  CLOSE_ORDER_DLQ_MESSAGE_TTL_MS,
   CLOSER_LIFECYCLE_EVENT_ABIS,
+  VAULT_CLOSER_LIFECYCLE_EVENT_ABIS,
 } from './close-order-event-decoder.js';
 
 export type {
@@ -230,6 +234,18 @@ export type {
   OrderValidUntilUpdatedEvent,
   OrderSlippageUpdatedEvent,
   OrderSwapIntentUpdatedEvent,
+  // Typed events (vault variant)
+  VaultOrderRegisteredEvent,
+  VaultOrderCancelledEvent,
+  VaultOrderExecutedEvent,
+  VaultOrderOperatorUpdatedEvent,
+  VaultOrderPayoutUpdatedEvent,
+  VaultOrderTriggerTickUpdatedEvent,
+  VaultOrderValidUntilUpdatedEvent,
+  VaultOrderSlippageUpdatedEvent,
+  VaultOrderSwapIntentUpdatedEvent,
+  VaultOrderSharesUpdatedEvent,
+  OrderSharesUpdatedPayload,
   AnyCloseOrderEvent,
   // Raw log type
   RawEventLog,
