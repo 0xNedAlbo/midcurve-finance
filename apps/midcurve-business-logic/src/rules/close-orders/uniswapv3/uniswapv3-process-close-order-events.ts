@@ -108,7 +108,19 @@ import type {
  *
  * v2: the v1 queue was declared without a dead-letter exchange, so nacked
  * messages were dropped. Queue arguments are immutable in RabbitMQ, so adding
- * the DLX means declaring a new queue and letting the old one drain.
+ * the DLX means declaring a new queue.
+ *
+ * DEPLOY STEP — the v1 queue does not drain, it fills. It is durable,
+ * autoDelete: false, and still bound to close-order-events with both routing
+ * patterns; a topic exchange delivers to every matching binding, so it keeps
+ * receiving every close order event with nobody consuming it, and grows until
+ * the disk does. Unbind or delete it as part of the deploy:
+ *
+ *   rabbitmqadmin delete queue name=business-logic.uniswapv3-process-close-order-events
+ *
+ * This is not done from code on purpose: deleting a queue that may still hold
+ * unprocessed v1 messages is destructive, and mid-rolling-deploy is the worst
+ * moment to decide that.
  */
 const QUEUE_NAME = 'business-logic.uniswapv3-process-close-order-events.v2';
 
