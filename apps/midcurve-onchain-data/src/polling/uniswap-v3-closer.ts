@@ -57,6 +57,14 @@ export class UniswapV3CloserPollingBatch {
    * cursor (see `start()`), and at that moment nothing has been scanned. The
    * flag separates "this is where we start looking" from "this is what we have
    * looked at", so the heartbeat can only ever persist the latter.
+   *
+   * Edge worth knowing: with no cached cursor AND catch-up disabled, this stays
+   * false for a full poll interval, so nothing is persisted and a restart in
+   * that window re-seeds from the head — the same skip, bounded to one interval
+   * instead of unbounded. In normal operation catch-up writes the cursor before
+   * any poller starts, so the window never opens. The cold-start cursor does
+   * therefore still depend on catch-up having run; what no longer depends on it
+   * is every subsequent restart.
    */
   private hasCompletedScan = false;
 
