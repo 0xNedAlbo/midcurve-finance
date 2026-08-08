@@ -1,25 +1,40 @@
 /**
  * UniswapV3 Process Close Order Events Rule
  *
- * Subscribes to UniswapV3 and UniswapV3-Vault close order lifecycle events
+ * Subscribes to UniswapV3 (NFT) and UniswapV3-Vault close order lifecycle events
  * from the onchain-data service and synchronizes the database with on-chain state.
  *
+ * Both protocol variants run through the same handlers. What differs is only the
+ * order identity and the position lookup:
+ * - NFT:   identity "uniswapv3/{chainId}/{nftId}/{triggerMode}", position by nftId
+ * - Vault: identity "uniswapv3-vault/{chainId}/{vault}/{owner}/{triggerMode}",
+ *          position by vault address + owner address (a vault is an ERC-20, so
+ *          several owners can hold their own orders on the same vault)
+ *
  * DB lifecycle driven by on-chain events:
- * - OrderRegistered → INSERT new order (automationState=monitoring)
+ * - OrderRegistered → ensure the identity slot holds this order (upsert)
  * - OrderCancelled → DELETE order from DB
  * - OrderExecuted → DELETE order from DB (execution data preserved in AutomationLog)
  * - Re-registration at same slot → DELETE old + INSERT new
  *
- * Config-change events (9 total):
+ * Config-change events:
  * - OrderOperatorUpdated: Update operatorAddress
  * - OrderPayoutUpdated: Update payoutAddress
  * - OrderTriggerTickUpdated: Update triggerTick + recalculate closeOrderHash
  * - OrderValidUntilUpdated: Update validUntil
  * - OrderSlippageUpdated: Update slippageBps
  * - OrderSwapIntentUpdated: Update swapDirection + swapSlippageBps
+ * - OrderSharesUpdated (vault only): Update shares
  *
  * Any config-change event on a failed order resets it to monitoring,
  * allowing the user to reactivate failed orders by updating any field.
+ *
+ * Message disposition — the two cases must stay distinguishable:
+ * - Understood but not ours (no matching position, no matching order): logged at
+ *   info/warn and acked. For a vault this is the normal case, since anyone can
+ *   hold shares and register an order.
+ * - Cannot be interpreted (unknown event type, missing identifiers, ambiguous
+ *   position): logged at error and dead-lettered to the DLQ.
  */
 
 import type { ConsumeMessage } from 'amqplib';
@@ -30,11 +45,15 @@ import {
   AutomationSubscriptionService,
   AutomationLogService,
   UniswapV3PositionService,
+  UniswapV3VaultPositionService,
+  createCloseOrderIdentityHash,
   deriveCloseOrderHashFromTick,
   generateOrderTagFromTick,
   getDomainEventPublisher,
   createDomainEvent,
   EXCHANGE_CLOSE_ORDER_EVENTS,
+  EXCHANGE_CLOSE_ORDER_EVENTS_DLX,
+  CLOSE_ORDER_DLQ_MESSAGE_TTL_MS,
 } from '@midcurve/services';
 import type {
   OrderCreatedContext,
@@ -49,6 +68,7 @@ import type {
 import {
   ContractTriggerMode,
   ContractSwapDirection,
+  normalizeAddress,
 } from '@midcurve/shared';
 
 /** Transaction client type — subset of PrismaClient usable inside $transaction */
@@ -67,14 +87,33 @@ import type {
   OrderValidUntilUpdatedEvent,
   OrderSlippageUpdatedEvent,
   OrderSwapIntentUpdatedEvent,
+  VaultOrderRegisteredEvent,
+  VaultOrderCancelledEvent,
+  VaultOrderExecutedEvent,
+  VaultOrderOperatorUpdatedEvent,
+  VaultOrderPayoutUpdatedEvent,
+  VaultOrderTriggerTickUpdatedEvent,
+  VaultOrderValidUntilUpdatedEvent,
+  VaultOrderSlippageUpdatedEvent,
+  VaultOrderSwapIntentUpdatedEvent,
+  VaultOrderSharesUpdatedEvent,
 } from './close-order-event-types';
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-/** Queue name for this rule's consumption */
-const QUEUE_NAME = 'business-logic.uniswapv3-process-close-order-events';
+/**
+ * Queue name for this rule's consumption.
+ *
+ * v2: the v1 queue was declared without a dead-letter exchange, so nacked
+ * messages were dropped. Queue arguments are immutable in RabbitMQ, so adding
+ * the DLX means declaring a new queue and letting the old one drain.
+ */
+const QUEUE_NAME = 'business-logic.uniswapv3-process-close-order-events.v2';
+
+/** Dead-letter queue for messages this rule cannot interpret */
+const DLQ_NAME = 'business-logic.uniswapv3-process-close-order-events.dlq';
 
 /** Routing pattern for UniswapV3 NFT close order events (4 segments: closer.chainId.nftId.triggerMode) */
 const UNISWAPV3_ROUTING_PATTERN = 'closer.*.*.*';
@@ -83,11 +122,94 @@ const UNISWAPV3_ROUTING_PATTERN = 'closer.*.*.*';
 const UNISWAPV3_VAULT_ROUTING_PATTERN = 'closer.vault.*.*.*';
 
 // =============================================================================
+// Event Type Unions (NFT + vault variant of the same lifecycle event)
+// =============================================================================
+
+type RegisteredEvent = OrderRegisteredEvent | VaultOrderRegisteredEvent;
+type CancelledEvent = OrderCancelledEvent | VaultOrderCancelledEvent;
+type ExecutedEvent = OrderExecutedEvent | VaultOrderExecutedEvent;
+type OperatorUpdatedEvent = OrderOperatorUpdatedEvent | VaultOrderOperatorUpdatedEvent;
+type PayoutUpdatedEvent = OrderPayoutUpdatedEvent | VaultOrderPayoutUpdatedEvent;
+type TriggerTickUpdatedEvent =
+  | OrderTriggerTickUpdatedEvent
+  | VaultOrderTriggerTickUpdatedEvent;
+type ValidUntilUpdatedEvent =
+  | OrderValidUntilUpdatedEvent
+  | VaultOrderValidUntilUpdatedEvent;
+type SlippageUpdatedEvent = OrderSlippageUpdatedEvent | VaultOrderSlippageUpdatedEvent;
+type SwapIntentUpdatedEvent =
+  | OrderSwapIntentUpdatedEvent
+  | VaultOrderSwapIntentUpdatedEvent;
+
+/**
+ * Thrown for messages this rule cannot interpret. Dead-lettered, never acked —
+ * as opposed to events that are understood but don't concern us.
+ */
+class UnroutableCloseOrderEventError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnroutableCloseOrderEventError';
+  }
+}
+
+// =============================================================================
 // String → Numeric Enum Mapping
 // =============================================================================
 
-function createOrderIdentityHash(chainId: number, nftId: string, triggerMode: number): string {
-  return `uniswapv3/${chainId}/${nftId}/${triggerMode}`;
+/** Vault events carry a vault address + owner instead of an nftId */
+function isVaultEvent(event: AnyCloseOrderEvent): boolean {
+  return event.vaultAddress !== undefined;
+}
+
+/**
+ * Builds the order identity hash for an event, via the helper shared with
+ * UniswapV3CloseOrderService.refresh() — the other writer of these rows.
+ */
+function orderIdentityHashForEvent(event: AnyCloseOrderEvent): string {
+  const triggerMode = parseTriggerMode(event.triggerMode);
+
+  if (isVaultEvent(event)) {
+    if (!event.ownerAddress) {
+      throw new UnroutableCloseOrderEventError(
+        `Vault close order event missing ownerAddress: type=${event.type} ` +
+          `vault=${event.vaultAddress} tx=${event.transactionHash}`
+      );
+    }
+    return createCloseOrderIdentityHash({
+      protocol: 'uniswapv3-vault',
+      chainId: event.chainId,
+      vaultAddress: event.vaultAddress!,
+      ownerAddress: event.ownerAddress,
+      triggerMode,
+    });
+  }
+
+  if (!event.nftId) {
+    throw new UnroutableCloseOrderEventError(
+      `Close order event has neither nftId nor vaultAddress: type=${event.type} ` +
+        `tx=${event.transactionHash}`
+    );
+  }
+
+  return createCloseOrderIdentityHash({
+    protocol: 'uniswapv3',
+    chainId: event.chainId,
+    nftId: event.nftId,
+    triggerMode,
+  });
+}
+
+/** Log context identifying the position an event refers to, for either protocol */
+function eventIdentityContext(event: AnyCloseOrderEvent): Record<string, unknown> {
+  return {
+    type: event.type,
+    chainId: event.chainId,
+    ...(isVaultEvent(event)
+      ? { vaultAddress: event.vaultAddress, ownerAddress: event.ownerAddress }
+      : { nftId: event.nftId }),
+    triggerMode: event.triggerMode,
+    txHash: event.transactionHash,
+  };
 }
 
 function parseTriggerMode(s: TriggerModeString): ContractTriggerMode {
@@ -104,6 +226,18 @@ function parseSwapDirection(s: SwapDirectionString): ContractSwapDirection {
 // Rule Implementation
 // =============================================================================
 
+/**
+ * Injectable collaborators. Production passes none; tests pass stubs so the rule
+ * can be exercised without RPC configuration.
+ */
+export interface UniswapV3ProcessCloseOrderEventsRuleDependencies {
+  orderService?: UniswapV3CloseOrderService;
+  automationSubscriptionService?: AutomationSubscriptionService;
+  automationLogService?: AutomationLogService;
+  positionService?: UniswapV3PositionService;
+  vaultPositionService?: UniswapV3VaultPositionService;
+}
+
 export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
   readonly ruleName = 'uniswapv3-process-close-order-events';
   readonly ruleDescription =
@@ -114,13 +248,21 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
   private automationSubscriptionService: AutomationSubscriptionService;
   private automationLogService: AutomationLogService;
   private positionService: UniswapV3PositionService;
+  private vaultPositionService: UniswapV3VaultPositionService;
 
-  constructor() {
+  constructor(dependencies: UniswapV3ProcessCloseOrderEventsRuleDependencies = {}) {
     super();
-    this.orderService = new UniswapV3CloseOrderService({ prisma });
-    this.automationSubscriptionService = new AutomationSubscriptionService({ prisma });
-    this.automationLogService = new AutomationLogService({ prisma });
-    this.positionService = new UniswapV3PositionService({ prisma });
+    this.orderService =
+      dependencies.orderService ?? new UniswapV3CloseOrderService({ prisma });
+    this.automationSubscriptionService =
+      dependencies.automationSubscriptionService ??
+      new AutomationSubscriptionService({ prisma });
+    this.automationLogService =
+      dependencies.automationLogService ?? new AutomationLogService({ prisma });
+    this.positionService =
+      dependencies.positionService ?? new UniswapV3PositionService({ prisma });
+    this.vaultPositionService =
+      dependencies.vaultPositionService ?? new UniswapV3VaultPositionService({ prisma });
   }
 
   // ===========================================================================
@@ -140,10 +282,28 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
       autoDelete: false,
     });
 
+    // Dead-letter topology: messages we cannot interpret land in the DLQ instead
+    // of being discarded, which is what made vault event loss invisible.
+    await this.channel.assertExchange(EXCHANGE_CLOSE_ORDER_EVENTS_DLX, 'fanout', {
+      durable: true,
+      autoDelete: false,
+    });
+    await this.channel.assertQueue(DLQ_NAME, {
+      durable: true,
+      autoDelete: false,
+      arguments: {
+        'x-message-ttl': CLOSE_ORDER_DLQ_MESSAGE_TTL_MS,
+      },
+    });
+    await this.channel.bindQueue(DLQ_NAME, EXCHANGE_CLOSE_ORDER_EVENTS_DLX, '');
+
     // Assert queue and bind to close order events exchange for both UniswapV3 variants
     await this.channel.assertQueue(QUEUE_NAME, {
       durable: true,
       autoDelete: false,
+      arguments: {
+        'x-dead-letter-exchange': EXCHANGE_CLOSE_ORDER_EVENTS_DLX,
+      },
     });
     await this.channel.bindQueue(
       QUEUE_NAME,
@@ -192,56 +352,66 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
     try {
       const event = JSON.parse(msg.content.toString()) as AnyCloseOrderEvent;
 
-      this.logger.debug(
-        {
-          type: event.type,
-          chainId: event.chainId,
-          nftId: event.nftId,
-          triggerMode: event.triggerMode,
-          txHash: event.transactionHash,
-        },
-        'Processing close order event'
-      );
+      this.logger.debug(eventIdentityContext(event), 'Processing close order event');
 
       await this.processEvent(event);
       this.channel.ack(msg);
     } catch (error) {
       this.logger.error(
         {
+          routingKey: msg.fields.routingKey,
+          unroutable: error instanceof UnroutableCloseOrderEventError,
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
         },
-        'Error processing close order event'
+        'Error processing close order event — dead-lettering'
       );
-      // Dead-letter the message, don't requeue (prevents infinite retry loops)
+      // Dead-letter the message, don't requeue (prevents infinite retry loops).
+      // The queue is declared with x-dead-letter-exchange, so this lands in the DLQ.
       this.channel.nack(msg, false, false);
     }
   }
 
+  /**
+   * Dispatches to the handler for the event's lifecycle type. NFT and vault
+   * variants of the same event share a handler — identity and position lookup
+   * are the only protocol-specific parts, and both are resolved inside.
+   */
   private async processEvent(event: AnyCloseOrderEvent): Promise<void> {
     switch (event.type) {
       case 'close-order.registered.uniswapv3':
+      case 'close-order.registered.uniswapv3-vault':
         return this.handleRegistered(event);
       case 'close-order.cancelled.uniswapv3':
+      case 'close-order.cancelled.uniswapv3-vault':
         return this.handleCancelled(event);
       case 'close-order.executed.uniswapv3':
+      case 'close-order.executed.uniswapv3-vault':
         return this.handleExecuted(event);
       case 'close-order.operator-updated.uniswapv3':
+      case 'close-order.operator-updated.uniswapv3-vault':
         return this.handleOperatorUpdated(event);
       case 'close-order.payout-updated.uniswapv3':
+      case 'close-order.payout-updated.uniswapv3-vault':
         return this.handlePayoutUpdated(event);
       case 'close-order.trigger-tick-updated.uniswapv3':
+      case 'close-order.trigger-tick-updated.uniswapv3-vault':
         return this.handleTriggerTickUpdated(event);
       case 'close-order.valid-until-updated.uniswapv3':
+      case 'close-order.valid-until-updated.uniswapv3-vault':
         return this.handleValidUntilUpdated(event);
       case 'close-order.slippage-updated.uniswapv3':
+      case 'close-order.slippage-updated.uniswapv3-vault':
         return this.handleSlippageUpdated(event);
       case 'close-order.swap-intent-updated.uniswapv3':
+      case 'close-order.swap-intent-updated.uniswapv3-vault':
         return this.handleSwapIntentUpdated(event);
+      case 'close-order.shares-updated.uniswapv3-vault':
+        return this.handleSharesUpdated(event);
       default:
-        this.logger.warn(
-          { type: (event as AnyCloseOrderEvent).type },
-          'Unknown close order event type'
+        // Not "understood but not ours" — we cannot interpret this at all.
+        throw new UnroutableCloseOrderEventError(
+          `Unknown close order event type: ${(event as AnyCloseOrderEvent).type}`
         );
     }
   }
@@ -258,28 +428,18 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
     event: AnyCloseOrderEvent,
     tx?: TxClient
   ): Promise<CloseOrder | null> {
-    if (!event.nftId) throw new Error('UniswapV3 close order event missing nftId');
-    const triggerMode = parseTriggerMode(event.triggerMode);
-    const orderIdentityHash = createOrderIdentityHash(
-      event.chainId,
-      event.nftId,
-      triggerMode
-    );
+    const orderIdentityHash = orderIdentityHashForEvent(event);
     const order = await this.orderService.findByOrderIdentityHash(
       orderIdentityHash,
       tx
     );
 
     if (!order) {
-      this.logger.warn(
-        {
-          chainId: event.chainId,
-          nftId: event.nftId,
-          triggerMode: event.triggerMode,
-          orderIdentityHash,
-          eventType: event.type,
-        },
-        'No matching close order found for event'
+      // Understood, but not ours — e.g. an order registered by a share holder we
+      // don't track, or an event for an order already removed. Not a fault.
+      this.logger.info(
+        { ...eventIdentityContext(event), orderIdentityHash },
+        'No matching close order found for event, skipping'
       );
     }
 
@@ -287,20 +447,73 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
   }
 
   /**
-   * Finds a position by nftId and chainId using Prisma JSON path filtering.
+   * Finds the position an event refers to.
+   *
+   * NFT:   by nftId + chainId.
+   * Vault: by vault address + owner address + chainId — a vault is an ERC-20, so
+   *        the owner is part of the position discriminator.
+   *
+   * Returns null when we simply don't track this position. Throws when the match
+   * is ambiguous: a CloseOrder row points at exactly one position, so more than
+   * one candidate is a state we cannot represent and must not guess at.
    */
-  private async findPositionByNftIdAndChain(
-    nftId: string,
-    chainId: number,
+  private async findPositionForEvent(
+    event: AnyCloseOrderEvent,
     tx?: TxClient
   ): Promise<{ id: string; config: Record<string, unknown> } | null> {
     const db = tx ?? prisma;
+
+    if (isVaultEvent(event)) {
+      if (!event.ownerAddress) {
+        throw new UnroutableCloseOrderEventError(
+          `Vault close order event missing ownerAddress: type=${event.type} ` +
+            `vault=${event.vaultAddress} tx=${event.transactionHash}`
+        );
+      }
+
+      // Position config stores both addresses EIP-55 checksummed
+      const vaultAddress = normalizeAddress(event.vaultAddress!);
+      const ownerAddress = normalizeAddress(event.ownerAddress);
+
+      const positions = await db.position.findMany({
+        where: {
+          protocol: 'uniswapv3-vault',
+          AND: [
+            { config: { path: ['chainId'], equals: event.chainId } },
+            { config: { path: ['vaultAddress'], equals: vaultAddress } },
+            { config: { path: ['ownerAddress'], equals: ownerAddress } },
+          ],
+        },
+        select: { id: true, config: true },
+      });
+
+      if (positions.length > 1) {
+        throw new UnroutableCloseOrderEventError(
+          `Ambiguous vault position for close order event: ${positions.length} matches ` +
+            `for chainId=${event.chainId} vault=${vaultAddress} owner=${ownerAddress} ` +
+            `(ids: ${positions.map((p) => p.id).join(', ')})`
+        );
+      }
+
+      const match = positions[0];
+      return match
+        ? { id: match.id, config: match.config as Record<string, unknown> }
+        : null;
+    }
+
+    if (!event.nftId) {
+      throw new UnroutableCloseOrderEventError(
+        `Close order event has neither nftId nor vaultAddress: type=${event.type} ` +
+          `tx=${event.transactionHash}`
+      );
+    }
+
     const positions = await db.position.findMany({
       where: {
         protocol: 'uniswapv3',
         config: {
           path: ['nftId'],
-          equals: parseInt(nftId, 10),
+          equals: parseInt(event.nftId, 10),
         },
       },
       select: { id: true, config: true },
@@ -308,7 +521,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
 
     const match = positions.find((p) => {
       const config = p.config as { chainId: number };
-      return config.chainId === chainId;
+      return config.chainId === event.chainId;
     });
 
     return match ? { id: match.id, config: match.config as Record<string, unknown> } : null;
@@ -329,10 +542,15 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
 
     if (triggerTick === null || triggerTick === undefined) return null;
 
-    const position = await this.positionService.findById(order.positionId, tx);
+    // Protocol-specific service; both expose isToken0Quote and pool token decimals
+    const position =
+      order.protocol === 'uniswapv3-vault'
+        ? await this.vaultPositionService.findById(order.positionId, tx)
+        : await this.positionService.findById(order.positionId, tx);
+
     if (!position) {
       this.logger.warn(
-        { positionId: order.positionId, orderId: order.id },
+        { positionId: order.positionId, orderId: order.id, protocol: order.protocol },
         'Cannot build order tag: position not found'
       );
       return null;
@@ -357,31 +575,36 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * Builds a CreateCloseOrderInput from a registered event.
    * Packs protocol-specific data into config/state JSON.
    */
-  private buildCreateInput(
-    event: OrderRegisteredEvent,
-    positionId: string,
-  ) {
-    if (!event.nftId) throw new Error('UniswapV3 close order event missing nftId');
+  private buildCreateInput(event: RegisteredEvent, positionId: string) {
     const triggerMode = parseTriggerMode(event.triggerMode);
     const { payload } = event;
+    const isVault = isVaultEvent(event);
 
-    const orderIdentityHash = createOrderIdentityHash(
-      event.chainId,
-      event.nftId,
-      triggerMode
-    );
+    // Config must match byte for byte what UniswapV3CloseOrderService.refresh()
+    // writes — it is the other writer of these rows.
+    const config = isVault
+      ? {
+          chainId: event.chainId,
+          vaultAddress: normalizeAddress(event.vaultAddress!),
+          ownerAddress: normalizeAddress(event.ownerAddress!),
+          triggerMode,
+          contractAddress: event.contractAddress,
+        }
+      : {
+          chainId: event.chainId,
+          nftId: event.nftId,
+          triggerMode,
+          contractAddress: event.contractAddress,
+        };
 
     return {
-      protocol: 'uniswapv3' as const,
+      protocol: (isVault ? 'uniswapv3-vault' : 'uniswapv3') as
+        | 'uniswapv3-vault'
+        | 'uniswapv3',
       positionId,
-      orderIdentityHash,
+      orderIdentityHash: orderIdentityHashForEvent(event),
       closeOrderHash: deriveCloseOrderHashFromTick(triggerMode, payload.triggerTick),
-      config: {
-        chainId: event.chainId,
-        nftId: event.nftId,
-        triggerMode,
-        contractAddress: event.contractAddress,
-      },
+      config,
       state: {
         triggerTick: payload.triggerTick,
         slippageBps: payload.slippageBps,
@@ -392,6 +615,8 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
         validUntil: new Date(Number(payload.validUntil) * 1000).toISOString(),
         swapDirection: parseSwapDirection(payload.swapDirection),
         swapSlippageBps: payload.swapSlippageBps,
+        // Vault share amount covered by the order (bigint as string)
+        ...(payload.shares !== undefined ? { shares: payload.shares } : {}),
         registrationTxHash: event.transactionHash,
         registeredAt: new Date().toISOString(),
         lastSyncBlock: parseInt(event.blockNumber, 10),
@@ -413,16 +638,9 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * 2. Order already exists (terminal or stale) → DELETE old, INSERT new (re-registration)
    * 3. No order exists → find position, INSERT new order
    */
-  private async handleRegistered(event: OrderRegisteredEvent): Promise<void> {
-    if (!event.nftId) throw new Error('UniswapV3 close order event missing nftId');
-    const { chainId, nftId, triggerMode, transactionHash, payload } = event as OrderRegisteredEvent & { nftId: string };
-    const triggerModeNum = parseTriggerMode(triggerMode);
-
-    const orderIdentityHash = createOrderIdentityHash(
-      chainId,
-      nftId,
-      triggerModeNum
-    );
+  private async handleRegistered(event: RegisteredEvent): Promise<void> {
+    const { chainId, transactionHash, payload } = event;
+    const orderIdentityHash = orderIdentityHashForEvent(event);
 
     const result = await prisma.$transaction(async (tx) => {
       // Check if order already exists at this identity slot
@@ -456,34 +674,37 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
         );
       }
 
-      // Find the position for this nftId + chainId
+      // Find the position this order belongs to
       const position = existingOrder
         ? await tx.position.findUnique({
             where: { id: existingOrder.positionId },
             select: { id: true, config: true },
           })
-        : await this.findPositionByNftIdAndChain(nftId, chainId, tx);
+        : await this.findPositionForEvent(event, tx);
 
       if (!position) {
-        this.logger.warn(
-          { chainId, nftId },
+        // A share holder we don't track can register an order on a vault we do
+        // track — expected, not a fault.
+        this.logger.info(
+          eventIdentityContext(event),
           'No position found for registered close order event, skipping'
         );
         return null;
       }
 
-      // INSERT new order
+      // Ensure the identity slot holds this order (idempotent against the
+      // concurrent writer, UniswapV3CloseOrderService.refresh())
       const createInput = this.buildCreateInput(event, position.id);
-      const created = await this.orderService.create(createInput, tx);
+      const created = await this.orderService.upsertByIdentityHash(createInput, tx);
 
       const isNew = !existingOrder;
 
       this.logger.info(
         {
+          ...eventIdentityContext(event),
           orderId: created.id,
           positionId: position.id,
-          nftId,
-          triggerMode,
+          protocol: created.protocol,
           isNew,
         },
         isNew
@@ -555,7 +776,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * DB lifecycle: on-chain cancellation → DELETE from DB.
    * Removes the pool subscription if no more monitoring orders reference that pool.
    */
-  private async handleCancelled(event: OrderCancelledEvent): Promise<void> {
+  private async handleCancelled(event: CancelledEvent): Promise<void> {
     const cancelResult = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
       if (!order) return null;
@@ -619,7 +840,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * DB lifecycle: on-chain execution → DELETE from DB.
    * Execution data is captured in AutomationLog before deletion.
    */
-  private async handleExecuted(event: OrderExecutedEvent): Promise<void> {
+  private async handleExecuted(event: ExecutedEvent): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
       if (!order) return null;
@@ -735,7 +956,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * Handles OrderOperatorUpdated events.
    */
   private async handleOperatorUpdated(
-    event: OrderOperatorUpdatedEvent
+    event: OperatorUpdatedEvent
   ): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
@@ -778,7 +999,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * Handles OrderPayoutUpdated events.
    */
   private async handlePayoutUpdated(
-    event: OrderPayoutUpdatedEvent
+    event: PayoutUpdatedEvent
   ): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
@@ -824,7 +1045,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * No more isToken0Quote/sqrtPriceX96 logic — tick is stored directly.
    */
   private async handleTriggerTickUpdated(
-    event: OrderTriggerTickUpdatedEvent
+    event: TriggerTickUpdatedEvent
   ): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
@@ -883,7 +1104,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * Handles OrderValidUntilUpdated events.
    */
   private async handleValidUntilUpdated(
-    event: OrderValidUntilUpdatedEvent
+    event: ValidUntilUpdatedEvent
   ): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
@@ -930,7 +1151,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * Handles OrderSlippageUpdated events.
    */
   private async handleSlippageUpdated(
-    event: OrderSlippageUpdatedEvent
+    event: SlippageUpdatedEvent
   ): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
@@ -978,7 +1199,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * Handles OrderSwapIntentUpdated events.
    */
   private async handleSwapIntentUpdated(
-    event: OrderSwapIntentUpdatedEvent
+    event: SwapIntentUpdatedEvent
   ): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const order = await this.resolveOrder(event, tx);
@@ -1006,6 +1227,58 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
           {
             orderTag,
             changes: 'swap intent',
+            chainId: event.chainId,
+          } satisfies OrderModifiedContext,
+          tx
+        );
+      }
+
+      return { orderId: order.id, positionId: order.positionId, orderIdentityHash: order.orderIdentityHash };
+    });
+
+    if (result) {
+      this.publishModifiedEvent(result.orderId, result.positionId, result.orderIdentityHash);
+    }
+  }
+
+  /**
+   * Handles OrderSharesUpdated events (vault only).
+   *
+   * The executor reads the share amount from the chain at execution time, so the
+   * stored value is display state — but a stored value that silently goes stale
+   * is the failure mode this rule exists to remove.
+   */
+  private async handleSharesUpdated(
+    event: VaultOrderSharesUpdatedEvent
+  ): Promise<void> {
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await this.resolveOrder(event, tx);
+      if (!order) return null;
+
+      // Share amounts are bigint — keep them as strings end to end
+      await this.orderService.mergeState(
+        order.id,
+        { shares: event.payload.newShares },
+        tx
+      );
+
+      this.logger.info(
+        {
+          orderId: order.id,
+          oldShares: event.payload.oldShares,
+          newShares: event.payload.newShares,
+        },
+        'Close order shares updated'
+      );
+
+      const orderTag = await this.buildOrderTag(order, tx);
+      if (orderTag) {
+        await this.automationLogService.logOrderModified(
+          order.positionId,
+          order.id,
+          {
+            orderTag,
+            changes: 'shares',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
           tx
