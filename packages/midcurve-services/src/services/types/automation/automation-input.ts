@@ -125,6 +125,12 @@ export interface OrderExecutedContext extends OrderLogContext {
   amount0Out: string;
   amount1Out: string;
   executionFeeBps: number;
+  /**
+   * Vault shares closed by the execution (vault orders only, bigint as string).
+   * The vault-specific quantity of the execution — without it the log cannot
+   * say how much of the position was closed.
+   */
+  sharesClosed?: string;
 }
 
 /**

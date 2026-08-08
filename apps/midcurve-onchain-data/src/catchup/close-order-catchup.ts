@@ -16,12 +16,19 @@
  * for eth_getLogs filtering, and decodes logs using the V100 ABI.
  */
 
-import { EvmConfig, EvmBlockService, CacheService } from '@midcurve/services';
-import { UniswapV3PositionCloserV100Abi } from '@midcurve/shared';
+import {
+  EvmConfig,
+  EvmBlockService,
+  CacheService,
+  closeOrderRoutingKeyForEvent,
+} from '@midcurve/services';
+import {
+  UniswapV3PositionCloserV100Abi,
+  UniswapV3VaultPositionCloserV100Abi,
+} from '@midcurve/shared';
 import { keccak256, toHex } from 'viem';
 import { onchainDataLogger } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
-import { buildCloseOrderRoutingKey } from '../mq/topology';
 import {
   buildCloseOrderEvent,
   serializeCloseOrderEvent,
@@ -135,39 +142,54 @@ async function getFinalizedBlockNumber(chainId: number): Promise<bigint> {
 // ============================================================
 
 /**
- * Compute keccak256 event signatures for the 8 lifecycle events.
- * We extract them by decoding the ABI entry names at import time.
+ * Lifecycle events the fallback path replays.
+ *
+ * OrderExecuted is included: half a safety net is worse than a known-missing
+ * one. OrderSharesUpdated is vault-only and simply absent from the NFT ABI.
  */
 const LIFECYCLE_EVENT_NAMES = new Set([
   'OrderRegistered',
   'OrderCancelled',
+  'OrderExecuted',
   'OrderOperatorUpdated',
   'OrderPayoutUpdated',
   'OrderTriggerTickUpdated',
   'OrderValidUntilUpdated',
   'OrderSlippageUpdated',
   'OrderSwapIntentUpdated',
+  'OrderSharesUpdated',
 ]);
 
 /**
- * Compute event signatures from the ABI.
+ * Compute event signatures from the ABIs.
  * viem's decodeEventLog handles this internally, but for eth_getLogs
  * topics[0] filtering we need the keccak256 hashes.
+ *
+ * Both closer ABIs are covered: the vault events carry different parameter
+ * types, so their topic0 differs and an NFT-only filter excludes every vault
+ * event even when the vault closer address is being polled.
  */
 function computeEventSignatures(): `0x${string}`[] {
-  const signatures: `0x${string}`[] = [];
+  const signatures = new Set<`0x${string}`>();
 
-  for (const item of UniswapV3PositionCloserV100Abi) {
-    if (item.type !== 'event') continue;
-    if (!LIFECYCLE_EVENT_NAMES.has(item.name)) continue;
+  const abis = [
+    UniswapV3PositionCloserV100Abi,
+    UniswapV3VaultPositionCloserV100Abi,
+  ] as const;
 
-    // Build canonical event signature string: EventName(type1,type2,...)
-    const params = item.inputs.map((input: { type: string }) => input.type).join(',');
-    const sig = `${item.name}(${params})`;
-    signatures.push(keccak256(toHex(sig)));
+  for (const abi of abis) {
+    for (const item of abi) {
+      if (item.type !== 'event') continue;
+      if (!LIFECYCLE_EVENT_NAMES.has(item.name)) continue;
+
+      // Build canonical event signature string: EventName(type1,type2,...)
+      const params = item.inputs.map((input: { type: string }) => input.type).join(',');
+      const sig = `${item.name}(${params})`;
+      signatures.add(keccak256(toHex(sig)));
+    }
   }
 
-  return signatures;
+  return Array.from(signatures);
 }
 
 const LIFECYCLE_EVENT_SIGNATURES = computeEventSignatures();
@@ -318,9 +340,9 @@ export async function executeCloseOrderCatchUpNonFinalized(
     const mq = getRabbitMQConnection();
 
     for (const { event } of events) {
-      if (!event || !event.nftId) continue;
+      if (!event) continue;
       try {
-        const routingKey = buildCloseOrderRoutingKey(chainId, event.nftId, event.triggerMode);
+        const routingKey = closeOrderRoutingKeyForEvent(event);
         const content = serializeCloseOrderEvent(event);
         await mq.publishCloseOrderEvent(routingKey, content);
         publishedCount++;
@@ -329,6 +351,8 @@ export async function executeCloseOrderCatchUpNonFinalized(
           chainId,
           eventType: event.type,
           nftId: event.nftId,
+          vaultAddress: event.vaultAddress,
+          ownerAddress: event.ownerAddress,
           error: error instanceof Error ? error.message : String(error),
         }, 'Failed to publish non-finalized close order catch-up event');
       }
@@ -401,9 +425,9 @@ export async function executeCloseOrderCatchUpFinalized(
     const mq = getRabbitMQConnection();
 
     for (const { event } of events) {
-      if (!event || !event.nftId) continue;
+      if (!event) continue;
       try {
-        const routingKey = buildCloseOrderRoutingKey(chainId, event.nftId, event.triggerMode);
+        const routingKey = closeOrderRoutingKeyForEvent(event);
         const content = serializeCloseOrderEvent(event);
         await mq.publishCloseOrderEvent(routingKey, content);
         publishedCount++;
@@ -412,6 +436,8 @@ export async function executeCloseOrderCatchUpFinalized(
           chainId,
           eventType: event.type,
           nftId: event.nftId,
+          vaultAddress: event.vaultAddress,
+          ownerAddress: event.ownerAddress,
           error: error instanceof Error ? error.message : String(error),
         }, 'Failed to publish finalized close order catch-up event');
       }

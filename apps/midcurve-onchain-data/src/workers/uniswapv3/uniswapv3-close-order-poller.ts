@@ -1,8 +1,9 @@
 /**
  * CloseOrderSubscriber Worker
  *
- * Loads active UniswapV3PositionCloser contracts from the SharedContract registry,
- * creates polling batches, and manages their lifecycle.
+ * Loads active UniswapV3PositionCloser and UniswapV3VaultPositionCloser contracts
+ * from the SharedContract registry, creates polling batches, and manages their
+ * lifecycle.
  * Publishes incoming lifecycle events (registration, cancellation, config updates)
  * to RabbitMQ as structured domain events.
  *
@@ -144,14 +145,22 @@ export class CloseOrderSubscriber {
   // ===========================================================================
 
   /**
-   * Load active UniswapV3PositionCloser contracts from SharedContract registry,
-   * grouped by chain ID.
+   * Load active closer contracts from the SharedContract registry, grouped by
+   * chain ID.
+   *
+   * Both the NFT closer and the vault closer are loaded — the fallback path has
+   * to cover direct contract interaction for either protocol.
    */
   private async loadActiveContracts(): Promise<Map<number, CloserContractInfo[]>> {
     priceLog.methodEntry(log, 'loadActiveContracts');
 
     const sharedContractService = new SharedContractService();
     const contractsByChain = new Map<number, CloserContractInfo[]>();
+
+    const CLOSER_CONTRACT_NAMES = [
+      SharedContractNameEnum.UNISWAP_V3_POSITION_CLOSER,
+      SharedContractNameEnum.UNISWAP_V3_VAULT_POSITION_CLOSER,
+    ];
 
     for (const chainId of SUPPORTED_CHAIN_IDS) {
       if (!isSupportedChain(chainId)) continue;
@@ -166,50 +175,53 @@ export class CloseOrderSubscriber {
           continue;
         }
 
-        const contract = await sharedContractService.findLatestByChainAndName(
-          chainId,
-          SharedContractNameEnum.UNISWAP_V3_POSITION_CLOSER
-        );
+        for (const contractName of CLOSER_CONTRACT_NAMES) {
+          const contract = await sharedContractService.findLatestByChainAndName(
+            chainId,
+            contractName
+          );
 
-        if (!contract) {
-          log.info({ chainId, msg: 'No active UniswapV3PositionCloser contract for chain' });
-          continue;
+          if (!contract) {
+            log.info({ chainId, contractName, msg: 'No active closer contract for chain' });
+            continue;
+          }
+
+          const config = contract.config as EvmSmartContractConfigData;
+
+          if (!config.address) {
+            log.warn({ chainId, contractId: contract.id, contractName, msg: 'Contract config missing address' });
+            continue;
+          }
+
+          if (!contractsByChain.has(chainId)) {
+            contractsByChain.set(chainId, []);
+          }
+
+          contractsByChain.get(chainId)!.push({
+            address: config.address,
+            chainId,
+          });
+
+          // Track for catch-up
+          if (!this.contractsByChain.has(chainId)) {
+            this.contractsByChain.set(chainId, []);
+          }
+          this.contractsByChain.get(chainId)!.push(config.address);
+
+          log.info({
+            chainId,
+            contractName,
+            address: config.address,
+            contractId: contract.id,
+            version: `${contract.interfaceVersionMajor}.${contract.interfaceVersionMinor}`,
+            msg: 'Loaded closer contract',
+          });
         }
-
-        const config = contract.config as EvmSmartContractConfigData;
-
-        if (!config.address) {
-          log.warn({ chainId, contractId: contract.id, msg: 'Contract config missing address' });
-          continue;
-        }
-
-        if (!contractsByChain.has(chainId)) {
-          contractsByChain.set(chainId, []);
-        }
-
-        contractsByChain.get(chainId)!.push({
-          address: config.address,
-          chainId,
-        });
-
-        // Track for catch-up
-        if (!this.contractsByChain.has(chainId)) {
-          this.contractsByChain.set(chainId, []);
-        }
-        this.contractsByChain.get(chainId)!.push(config.address);
-
-        log.info({
-          chainId,
-          address: config.address,
-          contractId: contract.id,
-          version: `${contract.interfaceVersionMajor}.${contract.interfaceVersionMinor}`,
-          msg: 'Loaded closer contract',
-        });
       } catch (error) {
         log.warn({
           chainId,
           error: error instanceof Error ? error.message : String(error),
-          msg: 'Failed to load closer contract for chain',
+          msg: 'Failed to load closer contracts for chain',
         });
       }
     }

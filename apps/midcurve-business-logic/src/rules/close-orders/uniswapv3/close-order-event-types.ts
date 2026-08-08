@@ -28,5 +28,17 @@ export type {
   OrderValidUntilUpdatedEvent,
   OrderSlippageUpdatedEvent,
   OrderSwapIntentUpdatedEvent,
+  OrderSharesUpdatedPayload,
+  // Vault variants — same payloads, vault/owner identifiers in the envelope
+  VaultOrderRegisteredEvent,
+  VaultOrderCancelledEvent,
+  VaultOrderExecutedEvent,
+  VaultOrderOperatorUpdatedEvent,
+  VaultOrderPayoutUpdatedEvent,
+  VaultOrderTriggerTickUpdatedEvent,
+  VaultOrderValidUntilUpdatedEvent,
+  VaultOrderSlippageUpdatedEvent,
+  VaultOrderSwapIntentUpdatedEvent,
+  VaultOrderSharesUpdatedEvent,
   AnyCloseOrderEvent,
 } from '@midcurve/services';
