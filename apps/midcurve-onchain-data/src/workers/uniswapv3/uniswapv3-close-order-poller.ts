@@ -26,7 +26,7 @@ import {
 } from '../../polling/uniswap-v3-closer';
 import {
   executeCloseOrderCatchUpFinalizedForChains,
-  setCloseOrderLastProcessedBlock,
+  updateCloseOrderBlockIfHigher,
 } from '../../catchup/close-order-catchup';
 
 const log = onchainDataLogger.child({ component: 'CloseOrderSubscriber' });
@@ -52,7 +52,7 @@ export class CloseOrderSubscriber {
    * 1. Load closer contracts from SharedContract registry
    * 2. Run finalized block catch-up (cachedBlock → current block)
    * 3. Start polling batches for new events
-   * 4. Start block tracking heartbeat
+   * 4. Start block tracking heartbeat (re-persists what the pollers scanned)
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -314,19 +314,39 @@ export class CloseOrderSubscriber {
 
   /**
    * Heartbeat update for block tracking.
+   *
+   * Re-persists each poller's scanned watermark — the highest block that has
+   * actually been through eth_getLogs — so the restart cursor survives a cache
+   * write that failed inside `poll()` (those failures are swallowed and warned,
+   * never retried), and so the cache row's `updatedAt` stays a liveness signal.
+   *
+   * It deliberately does NOT read the chain head. Persisting the head here
+   * would claim every block up to it had been scanned, and a restart would then
+   * resume past everything the poller had not yet looked at — silently, since
+   * an unscanned range and an empty one produce identical logs.
+   *
+   * Pollers that have not completed a scan report null and are skipped: their
+   * in-memory position is a starting point, not a result.
    */
   private async updateBlockTrackingHeartbeat(): Promise<void> {
-    const evmConfig = EvmConfig.getInstance();
+    for (const poller of this.pollers) {
+      const scannedBlock = poller.getLastScannedBlock();
 
-    for (const [chainId] of this.contractsByChain) {
+      if (scannedBlock === null) {
+        log.debug({ chainId: poller.chainId, msg: 'No completed scan yet, skipping cursor heartbeat' });
+        continue;
+      }
+
       try {
-        const client = evmConfig.getPublicClient(chainId);
-        const currentBlock = await client.getBlockNumber();
-        await setCloseOrderLastProcessedBlock(chainId, currentBlock);
-        log.debug({ chainId, blockNumber: currentBlock.toString(), msg: 'Close order block tracking heartbeat' });
+        await updateCloseOrderBlockIfHigher(poller.chainId, scannedBlock);
+        log.debug({
+          chainId: poller.chainId,
+          blockNumber: scannedBlock.toString(),
+          msg: 'Close order block tracking heartbeat',
+        });
       } catch (err) {
         log.warn({
-          chainId,
+          chainId: poller.chainId,
           error: err instanceof Error ? err.message : String(err),
           msg: 'Failed to update close order block tracking heartbeat',
         });
