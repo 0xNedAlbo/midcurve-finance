@@ -53,3 +53,12 @@ jobs:
 
       - name: Test @midcurve/mcp-server
         run: pnpm --filter @midcurve/mcp-server test:run
+
+      - name: Test @midcurve/services
+        run: pnpm --filter @midcurve/services test:run
+
+      - name: Test @midcurve/business-logic
+        run: pnpm --filter @midcurve/business-logic test:run
+
+      - name: Test @midcurve/onchain-data
+        run: pnpm --filter @midcurve/onchain-data test:run
