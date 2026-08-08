@@ -11,10 +11,9 @@
  * and publishes decoded domain events to RabbitMQ.
  */
 
-import { EvmConfig } from '@midcurve/services';
+import { EvmConfig, closeOrderRoutingKeyForEvent } from '@midcurve/services';
 import { onchainDataLogger } from '../lib/logger';
 import { getRabbitMQConnection } from '../mq/connection-manager';
-import { buildCloseOrderRoutingKey } from '../mq/topology';
 import {
   serializeCloseOrderEvent,
 } from '../mq/close-order-messages';
@@ -159,8 +158,8 @@ export class UniswapV3CloserPollingBatch {
       let publishedCount = 0;
 
       for (const { event } of events) {
-        if (!event || !event.nftId) continue;
-        const routingKey = buildCloseOrderRoutingKey(this.chainId, event.nftId, event.triggerMode);
+        if (!event) continue;
+        const routingKey = closeOrderRoutingKeyForEvent(event);
         const content = serializeCloseOrderEvent(event);
         await mq.publishCloseOrderEvent(routingKey, content);
         publishedCount++;
