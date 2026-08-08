@@ -860,6 +860,11 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             amount0Out: event.payload.amount0Out,
             amount1Out: event.payload.amount1Out,
             executionFeeBps: 0,
+            // Vault-specific: how much of the position was closed. The row is
+            // about to be deleted, so the log is the only place this survives.
+            ...(event.payload.sharesClosed !== undefined
+              ? { sharesClosed: event.payload.sharesClosed }
+              : {}),
           } satisfies OrderExecutedContext,
           tx
         );

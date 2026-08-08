@@ -386,8 +386,40 @@ describe('UniswapV3ProcessCloseOrderEventsRule — vault orders', () => {
     const context = mocks.log.logOrderExecuted.mock.calls[0]![2] as Record<string, unknown>;
     expect(context.amount0Out).toBe('500');
     expect(context.amount1Out).toBe('600');
+    // The row is deleted right after — the log is the only place the vault
+    // quantity survives, so it has to reach the context (string, not bigint)
+    expect(context.sharesClosed).toBe('1000000000000000000');
     expect(mocks.order.delete).toHaveBeenCalledWith('ord_vault_1', txMock);
     expect(mocks.subscription.removeOrderSubscription).toHaveBeenCalledWith('ord_vault_1');
+  });
+
+  it('omits sharesClosed for an NFT execution rather than writing a placeholder', async () => {
+    const { rule, mocks } = buildRule();
+    mocks.order.findByOrderIdentityHash.mockResolvedValue(
+      storedVaultOrder({ protocol: 'uniswapv3' }),
+    );
+
+    await processEvent(rule, {
+      type: 'close-order.executed.uniswapv3',
+      chainId: CHAIN_ID,
+      contractAddress: CLOSER,
+      nftId: NFT_ID,
+      triggerMode: 'LOWER',
+      blockNumber: '300000000',
+      transactionHash: '0xfeedface',
+      logIndex: 1,
+      receivedAt: '2026-08-08T00:00:00.000Z',
+      payload: {
+        owner: OWNER_A,
+        payout: PAYOUT,
+        executionTick: TRIGGER_TICK,
+        amount0Out: '500',
+        amount1Out: '600',
+      },
+    } as never);
+
+    const context = mocks.log.logOrderExecuted.mock.calls[0]![2] as Record<string, unknown>;
+    expect('sharesClosed' in context).toBe(false);
   });
 
   // AC 6
