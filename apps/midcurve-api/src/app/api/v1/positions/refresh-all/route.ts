@@ -23,7 +23,6 @@ import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
   getUniswapV3VaultPositionService,
-  getUniswapV3StakingPositionService,
 } from '@/lib/services';
 
 export const runtime = 'nodejs';
@@ -92,8 +91,6 @@ export async function POST(request: NextRequest): Promise<Response> {
           await getUniswapV3PositionService().refresh(p.id);
         } else if (p.protocol === 'uniswapv3-vault') {
           await getUniswapV3VaultPositionService().refresh(p.id);
-        } else if (p.protocol === 'uniswapv3-staking') {
-          await getUniswapV3StakingPositionService().refresh(p.id);
         } else {
           apiLogger.warn(
             { requestId, positionId: p.id, protocol: p.protocol },

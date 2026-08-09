@@ -21,6 +21,3 @@ export * from './uniswapv3/index.js';
 
 // UniswapV3 Vault
 export * from './uniswapv3-vault/index.js';
-
-// UniswapV3 Staking
-export * from './uniswapv3-staking/index.js';
