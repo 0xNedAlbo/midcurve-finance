@@ -10,7 +10,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["public", "accounting"]
+  schemas  = ["public"]
 }
 
 // Models for concentrated liquidity positions
@@ -107,9 +107,6 @@ model User {
   // Admin flag (set by config wizard when admin wallet is saved)
   isAdmin Boolean @default(false) @map("is_admin")
 
-  // Reporting currency for accounting (ISO 4217)
-  reportingCurrency String @default("USD")
-
   // Session relation (custom server-side sessions)
   sessions Session[]
 
@@ -124,11 +121,6 @@ model User {
 
   // User settings (1:1)
   userSettings UserSettings?
-
-  // Accounting relations
-  journalEntries     JournalEntry[]
-  tokenLots          TokenLot[]
-  tokenLotDisposals  TokenLotDisposal[]
 
   // Wallet perimeter relations
   userWallets UserWallet[]
@@ -170,11 +162,8 @@ model Token {
   config Json
 
   // Token hash for fast lookups by type+chain+address
-  // Format: "erc20/{chainId}/{address}", "erc721/{chainId}/{contractAddr}/{tokenId}", or "basic-currency/{currencyCode}"
+  // Format: "erc20/{chainId}/{address}" or "basic-currency/{currencyCode}"
   tokenHash String @unique
-
-  // Token lot relations
-  tokenLots TokenLot[]
 
   // Indexes for efficient queries
   @@index([tokenType])
@@ -349,11 +338,6 @@ model PositionLedgerEvent {
   // Protocol-specific data (JSON)
   config Json // Protocol-specific config (blockNumber, txIndex, logIndex, liquidity, fees, etc.)
   state  Json // Raw event data (INCREASE_LIQUIDITY, DECREASE_LIQUIDITY, COLLECT, TRANSFER, etc.)
-
-  // Accounting relations (cascade-deleted when ledger event is deleted)
-  journalEntries JournalEntry[]
-  tokenLots      TokenLot[]
-  tokenLotDisposals TokenLotDisposal[]
 
   @@unique([positionId, inputHash]) // Deduplication per-position; allows multi-user event import
   // Indexes for efficient queries
@@ -809,249 +793,8 @@ model UserSettings {
   @@schema("public")
 }
 
-// =============================================================================
-// Double-Entry Accounting Models (accounting schema)
-// =============================================================================
-
-// AccountDefinition - Chart of Accounts
-// Seeded with Phase 1 accounts (11 accounts). Rarely changes after initial setup.
-model AccountDefinition {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Account identity
-  code Int    @unique // Account number (1000, 1001, 3000, etc.)
-  name String // Human-readable name (e.g., "LP Position at Cost")
-
-  // Classification
-  description String? // Longer explanation
-  category    String // "asset" | "liability" | "equity" | "revenue" | "expense"
-  normalSide  String // "debit" | "credit" — the side that increases this account
-
-  // Status
-  isActive Boolean @default(true)
-
-  // Relations
-  journalLines JournalLine[]
-
-  @@index([category])
-  @@map("account_definitions")
-  @@schema("accounting")
-}
-
-// JournalEntry - One entry per accounting event
-// Contains one or more balanced lines (total debits = total credits in amountQuote).
-model JournalEntry {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  // Owner
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Traceability
-  domainEventId   String? @unique // References DomainEvent.id for idempotency
-  domainEventType String? // Event type discriminator (e.g., "position.liquidity.increased")
-
-  // Ledger event FK — cascade-deletes this entry when the ledger event is deleted
-  positionLedgerEventId String?
-  positionLedgerEvent   PositionLedgerEvent? @relation(fields: [positionLedgerEventId], references: [id], onDelete: Cascade)
-
-  // Business date
-  entryDate DateTime // Block timestamp for on-chain events, snapshot date for M2M
-
-  // Description
-  description String // Human-readable (e.g., "Liquidity increase: uniswapv3/1/12345")
-  memo        String? // Optional additional context
-
-  // Relations
-  lines JournalLine[]
-
-  // Token lot FK — cascade-deletes this entry when the lot is deleted
-  tokenLotId String?   @unique
-  tokenLot   TokenLot? @relation("LotAcquisitionEntry", fields: [tokenLotId], references: [id], onDelete: Cascade)
-
-  // Disposal FK — cascade-deletes this entry when the disposal is deleted
-  tokenLotDisposalId String?            @unique
-  tokenLotDisposal   TokenLotDisposal?  @relation("LotDisposalEntry", fields: [tokenLotDisposalId], references: [id], onDelete: Cascade)
-
-  @@index([userId, entryDate])
-  @@index([positionLedgerEventId])
-  @@map("journal_entries")
-  @@schema("accounting")
-}
-
-// JournalLine - Individual debit or credit line within a journal entry
-model JournalLine {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  // Parent entry
-  journalEntryId String
-  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
-
-  // Account
-  accountId String
-  account   AccountDefinition @relation(fields: [accountId], references: [id])
-
-  // Position reference (no FK — allows any position type)
-  positionRef   String? // e.g., "uniswapv3/42161/5334690" (position hash)
-  // Instrument reference (denormalized pool hash for fast GROUP BY)
-  instrumentRef String? // e.g., "uniswapv3/42161/0x8ad5..." (pool hash)
-
-  // Debit or credit
-  side String // "debit" | "credit"
-
-  // Amount in quote token raw units (bigint as string, same scale as Position.currentValue)
-  amountQuote String
-
-  // Amount in reporting currency (bigint as string, scaled by 10^8)
-  amountReporting   String? // e.g., $3,000.50 → "300050000000"
-  reportingCurrency String? // ISO 4217 (e.g., "USD", "EUR")
-  exchangeRate      String? // Quote token → reporting currency rate (bigint string, scaled 10^8)
-
-  @@index([journalEntryId])
-  @@index([accountId])
-  @@index([positionRef])
-  @@index([accountId, positionRef])
-  @@index([instrumentRef])
-  @@index([accountId, instrumentRef])
-  @@map("journal_lines")
-  @@schema("accounting")
-}
-
-
-// =============================================================================
-// Token Lot Tracking Models (accounting schema)
-// =============================================================================
-
-enum TokenLotTransferEvent {
-  INCREASE_POSITION
-  DECREASE_POSITION
-  TRANSFER_IN
-  TRANSFER_OUT
-  VAULT_MINT
-  VAULT_BURN
-  DEPOSIT_TO_PROTOCOL
-  WITHDRAWAL_FROM_PROTOCOL
-  STAKING_DEPOSIT
-  STAKING_DISPOSE
-
-  @@schema("accounting")
-}
-
-// TokenLot - Records a distinct token acquisition with its cost basis.
-// One lot per position event (e.g., each INCREASE_POSITION creates one lot).
-// Token reference is an individual ERC-721 NFT; quantity is in liquidity units (deltaL).
-model TokenLot {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  // Owner
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Token reference (individual ERC-721 NFT or vault share token)
-  tokenId   String
-  token     Token  @relation(fields: [tokenId], references: [id])
-  tokenHash String // Denormalized for fast queries: "erc721/{chainId}/{addr}/{nftId}"
-
-  // Acquisition data
-  quantity          String   // bigint string — liquidity units (deltaL)
-  costBasisAbsolute String   // bigint string — reporting currency, scaled 10^8
-  acquiredAt        DateTime // Block timestamp
-
-  // Provenance
-  acquisitionEventId String                // inputHash from PositionLedgerEvent
-  transferEvent      TokenLotTransferEvent
-
-  // Ledger event FK — cascade-deletes this lot when the ledger event is deleted
-  positionLedgerEventId String
-  positionLedgerEvent   PositionLedgerEvent @relation(fields: [positionLedgerEventId], references: [id], onDelete: Cascade)
-
-  // Ordering (lot-local, sortable for FIFO/LIFO)
-  sequenceNum Int
-
-  // Relations
-  lotState     TokenLotState?
-  disposals    TokenLotDisposal[]
-  journalEntry JournalEntry?      @relation("LotAcquisitionEntry") // Back-reference (FK owned by JournalEntry)
-
-  @@unique([userId, tokenHash, acquisitionEventId]) // Idempotency
-  @@index([userId, tokenHash])
-  @@index([userId, tokenHash, acquiredAt]) // FIFO ordering
-  @@index([userId, sequenceNum])
-  @@index([positionLedgerEventId])
-  @@map("token_lots")
-  @@schema("accounting")
-}
-
-// TokenLotState - Mutable consumption state for a token lot (1:1).
-// Tracks how much of the lot's original quantity remains unconsumed.
-model TokenLotState {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Parent lot (1:1)
-  lotId String   @unique
-  lot   TokenLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
-
-  // Mutable consumption state
-  openQuantity    String  // bigint string — remaining unconsumed liquidity
-  isFullyConsumed Boolean @default(false)
-
-  @@index([isFullyConsumed])
-  @@map("token_lot_states")
-  @@schema("accounting")
-}
-
-// TokenLotDisposal - Records consumption of a token lot during a disposal event.
-// Links the disposed quantity back to the source lot and the resulting journal entry.
-model TokenLotDisposal {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-
-  // Parent lot
-  lotId String
-  lot   TokenLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
-
-  // Owner (denormalized)
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Disposal data
-  quantityDisposed   String   // bigint string — liquidity units consumed
-  proceedsReporting  String   // bigint string — proceeds in reporting currency, scaled 10^8
-  costBasisAllocated String   // bigint string — lot cost basis portion consumed, scaled 10^8
-  realizedPnl        String   // bigint string — proceeds minus cost basis, scaled 10^8
-  disposedAt         DateTime // Block timestamp
-  transferEvent      TokenLotTransferEvent
-
-  // Provenance
-  disposalEventId String // inputHash from PositionLedgerEvent
-
-  // Ledger event FK — cascade-deletes this disposal when the ledger event is deleted
-  positionLedgerEventId String
-  positionLedgerEvent   PositionLedgerEvent @relation(fields: [positionLedgerEventId], references: [id], onDelete: Cascade)
-
-  // Ordering
-  sequenceNum Int
-
-  // Relations
-  journalEntry JournalEntry? @relation("LotDisposalEntry") // Back-reference (FK owned by JournalEntry)
-
-  @@index([lotId])
-  @@index([userId, disposedAt])
-  @@index([disposalEventId])
-  @@index([positionLedgerEventId])
-  @@map("token_lot_disposals")
-  @@schema("accounting")
-}
-
 // ============================================================================
-// WALLET PERIMETER (user-owned wallets + known protocol addresses)
+// WALLET PERIMETER (user-owned wallets)
 // ============================================================================
 
 // UserWallet — tracks which wallets belong to a user (cross-chain identity)
@@ -1088,47 +831,5 @@ model UserWallet {
   @@index([walletHash])
   @@index([walletType])
   @@map("user_wallets")
-  @@schema("public")
-}
-
-// KnownProtocolAddress — registry of known protocol contract addresses
-// Used to classify transfers: vault deposit vs. sale vs. staking etc.
-model KnownProtocolAddress {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Type discriminator (chain platform)
-  chainType String // 'evm' | 'solana'
-
-  // Protocol identification
-  protocolName String // 'arrakis', 'aave', 'uniswapv3', etc.
-
-  // What happens when assets go to this address
-  // 'vault' = tokenized wrapper (position stays in user perimeter)
-  // 'staking' = staked/locked (position stays in user perimeter)
-  // 'bridge' = cross-chain transfer (position leaves but reappears)
-  // 'router' = transient (swap router, not a destination)
-  interactionType String // 'vault' | 'staking' | 'bridge' | 'router'
-
-  // Human-readable composite key: "evm/{chainId}/{address}"
-  // chainId IS needed — same address on different chains can be different protocols
-  protocolAddressHash String @unique
-
-  // Display label (optional)
-  label String?
-
-  // Platform-specific config (JSON)
-  // EVM: { chainId: 42161, address: "0xABC..." }
-  config Json
-
-  // Status (allows soft-disable without deletion)
-  isActive Boolean @default(true)
-
-  @@index([chainType])
-  @@index([protocolName])
-  @@index([interactionType])
-  @@index([isActive])
-  @@map("known_protocol_addresses")
   @@schema("public")
 }

@@ -35,7 +35,6 @@ RUN cd apps/midcurve-api && npx next build --webpack
 
 # Bundle seed scripts with esbuild (self-contained JS, Prisma client external)
 RUN pnpm exec esbuild \
-  packages/midcurve-database/prisma/seed-accounts.ts \
   packages/midcurve-database/prisma/seed-contracts.ts \
   packages/midcurve-database/prisma/seed-allowlist.ts \
   packages/midcurve-database/prisma/seed-coingecko-tokens.ts \
