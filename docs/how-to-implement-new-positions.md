@@ -10,11 +10,11 @@ For the data model the integration plugs into, see [positions.md](./positions.md
 
 ## Background
 
-Adding a new position protocol is a vertical-stack change: it touches the on-chain reads, the ledger service, the journal-posting rule, the REST API, the MCP tools, and the UI. The temptation, when starting from a working integration of a similar protocol, is to clone its folder structure, rename, and adapt as you go. That works when two protocols genuinely share the same semantics — but breaks when they only look similar on the surface.
+Adding a new position protocol is a vertical-stack change: it touches the on-chain reads, the ledger service, the business-logic rules, the REST API, the MCP tools, and the UI. The temptation, when starting from a working integration of a similar protocol, is to clone its folder structure, rename, and adapt as you go. That works when two protocols genuinely share the same semantics — but breaks when they only look similar on the surface.
 
 The friction points show up late and are expensive to fix:
 
-- An unbalanced disposal entry surfaces in accounting tests after the journal-posting rule is already in production-ready shape.
+- A PnL decomposition turns out not to balance, after the ledger service is already in production-ready shape.
 - A REST endpoint turns out to be meaningless for the new protocol after the route, the service method, and the wire types have all been written.
 - A refresh cache silently swallows user actions because it was tuned for one protocol's lifecycle and inherited unmodified by another.
 
@@ -129,13 +129,13 @@ The four-component decomposition is fixed (`realizedPnl` / `realizedCashflow` / 
 
 ### 2.4 Domain events
 
-Ledger events trigger downstream consumers (journal-posting rule, reconciliation rule, APR service, notifications) via domain events on the `position-liquidity-events` exchange. The question to answer here is whether the existing event family suffices or whether the new protocol needs new routing keys, payload extensions, or a dedicated exchange.
+Ledger events trigger downstream consumers (business-logic rules, APR service, notifications) via domain events on the `position-liquidity-events` exchange. The question to answer here is whether the existing event family suffices or whether the new protocol needs new routing keys, payload extensions, or a dedicated exchange.
 
 Default answer: the existing infrastructure suffices. Routing keys follow the convention `position.liquidity.<protocol>.<eventType>`, and consumers filter by topic — adding a new protocol means adding a new `<protocol>` segment to the routing key, not a new exchange. The payload shape (positionId, eventId, eventType, blockNumber, txHash, plus event-specific `config`) generalises across protocols.
 
 A new protocol needs to deviate only when one of the following holds: it produces an event that has no analog in the existing taxonomy and demands a payload field outside the `config` envelope; it requires a different delivery guarantee (e.g. ordered per-vault delivery vs. unordered per-position); or it introduces a new consumer that cannot be satisfied by adding a topic subscription to the existing exchange. None of these is common.
 
-Decide here, not in phase 5 or 7. Phase 7 (accounting rule) presupposes that domain events exist and have a known shape; deferring this decision causes the phase-7 work to either invent an ad-hoc shape or block on retroactive guide updates. If the answer is "reuse existing", say so explicitly in the spec section; if "new", specify the routing key family and any payload deltas.
+Decide here, not in phase 5 or 7. Phase 7 (business-logic rules) presupposes that domain events exist and have a known shape; deferring this decision causes the phase-7 work to either invent an ad-hoc shape or block on retroactive guide updates. If the answer is "reuse existing", say so explicitly in the spec section; if "new", specify the routing key family and any payload deltas.
 
 ### 2.5 Computation as code
 
@@ -281,9 +281,9 @@ A section appended to `docs/positions/<protocol>.md` with four sub-sections matc
 
 *To be detailed.* In skeleton form: `LedgerService` (canonical reference: `UniswapV3LedgerService`), `PositionService` (closer reference: `UniswapV3VaultPositionService` for clone-shaped protocols, `UniswapV3PositionService` for tracked-NFT protocols), optional `AprService` if period-bracketing logic diverges from the NFT default. Automation services from phase 4.3 also slot in here.
 
-## Phase 7 — Accounting / business-logic rule
+## Phase 7 — Business-logic rules
 
-*To be detailed.* In skeleton form: lot token identity (synthetic share token), Chart of Accounts mapping under [philosophy.md](./philosophy.md)'s Model A, disposal logic with proportional cost basis allocation, FX adjustment.
+*To be detailed.* In skeleton form: which domain events the protocol needs a consumer for, and whether an existing rule generalises or a protocol-specific one is required. Canonical reference: `UniswapV3ProcessCloseOrderEventsRule` for close-order lifecycle, `UniswapV3ReevaluateOnWalletChangeRule` for ledger aggregates that depend on the user's wallet set. A protocol whose ownership is a single address needs no equivalent of the latter.
 
 ## Phase 8 — REST API
 
@@ -291,7 +291,7 @@ A section appended to `docs/positions/<protocol>.md` with four sub-sections matc
 
 ## Phase 9 — MCP server tools
 
-*To be detailed.* In skeleton form: read-only tools (`list_<proto>_positions`, `get_<proto>_position`, `get_<proto>_apr`, `get_<proto>_accounting`); reuse `simulate_position_at_price` and `generate_position_pnl_curve` if the protocol's domain class implements `simulatePnLAtPrice`.
+*To be detailed.* In skeleton form: read-only tools (`list_<proto>_positions`, `get_<proto>_position`, `get_<proto>_apr`); reuse `simulate_position_at_price` and `generate_position_pnl_curve` if the protocol's domain class implements `simulatePnLAtPrice`.
 
 ---
 
@@ -303,8 +303,8 @@ These are anti-goals. If you find yourself doing one of these, stop and reread p
 - **Treating internal accumulators as state.** Storage slots of an underlying primitive are implementation details of how metrics are computed. They do not belong in `state` unless the UI reads them.
 - **Building endpoints before the UI concept exists.** The endpoint catalog *is* the UI concept's contract. Specifying endpoints first creates pressure to keep them when the UI later finds them irrelevant.
 - **Adding a refresh cache before the lifecycle is mapped.** Caches that are blind to lifecycle transitions silently break user actions. Cache by block number, not by wall-clock.
-- **Deferring accounting-line decisions to the journal-posting rule.** Decisions about which proceeds component is principal vs. income vs. gain belong in phase 2.3 (PnL decomposition). Pushing them down causes balance bugs that surface only in test.
-- **Deferring the domain-event decision to phase 5 or 7.** The shape and routing of domain events is a phase-2 concept question, not a phase-5 wiring question. Phase 7 (accounting rule) presupposes a known event shape; deferring forces ad-hoc shapes or retroactive guide updates.
+- **Deferring PnL-decomposition decisions to the ledger service.** Which proceeds component is principal vs. income vs. gain belongs in phase 2.3. Pushing it down causes balance bugs that surface only in test.
+- **Deferring the domain-event decision to phase 5 or 7.** The shape and routing of domain events is a phase-2 concept question, not a phase-5 wiring question. Phase 7 (business-logic rules) presupposes a known event shape; deferring forces ad-hoc shapes or retroactive guide updates.
 - **Treating automation as a phase-3 UI checkbox.** Whether the position is automated, by whom, with what owner controls, is a concept-level question (phase 4) that produces UI requirements as a byproduct — not the other way around. Designing automation as "what buttons should the action row have" misses constitutive automation entirely (the staking vault's `swap()` callability is not a button) and inflates optional automation into UI clutter.
 
 ---
