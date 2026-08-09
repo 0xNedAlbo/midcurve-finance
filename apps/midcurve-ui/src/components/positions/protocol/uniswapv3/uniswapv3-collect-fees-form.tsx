@@ -119,15 +119,13 @@ export function UniswapV3CollectFeesForm({
     !isWrongAccount &&
     unclaimedFees > 0n;
 
-  // The prompt only renders once connected and on the owner account, so those
-  // two states are explained by EvmWalletConnectionPrompt and
-  // EvmAccountSwitchPrompt above. These are the reasons that can actually reach
-  // a disabled button.
+  // A wrong network is the only reason that can reach a disabled button. The
+  // prompt renders only once connected and on the owner account, and the modal
+  // cannot be opened at all without unclaimed fees — uniswapv3-actions disables
+  // its entry point on `!hasUnclaimedFees`.
   const collectDisabledReason =
     isWrongNetwork && chainConfig
       ? `Switch your wallet to ${chainConfig.name} to collect fees.`
-      : unclaimedFees === 0n
-      ? 'There are no unclaimed fees to collect.'
       : undefined;
 
   // Transaction prompt (MUST be called before any returns)
