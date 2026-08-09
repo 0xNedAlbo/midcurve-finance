@@ -9,6 +9,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { UniswapV3VaultPosition } from '@midcurve/shared';
 
 const prisma = new PrismaClient();
 
@@ -47,7 +48,11 @@ async function backfillPositionHash() {
         positionHash = `uniswapv3/${config.chainId}/${config.nftId}`;
       } else if (position.protocol === 'uniswapv3-vault') {
         const config = position.config as { chainId: number; vaultAddress: string; ownerAddress: string };
-        positionHash = `uniswapv3-vault/${config.chainId}/${config.vaultAddress}/${config.ownerAddress}`;
+        positionHash = UniswapV3VaultPosition.createHash(
+          config.chainId,
+          config.vaultAddress,
+          config.ownerAddress
+        );
       } else {
         console.warn(`Unknown protocol: ${position.protocol}, skipping position ${position.id}`);
         continue;

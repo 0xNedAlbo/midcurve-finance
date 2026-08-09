@@ -25,6 +25,7 @@ import {
   priceToSqrtRatioX96,
   tickToSqrtRatioX96,
   type Erc20Token,
+  UniswapV3VaultPosition,
 } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getUniswapV3VaultPositionService } from '@/lib/services';
@@ -79,7 +80,7 @@ export async function GET(
 
       const { chainId, vaultAddress, ownerAddress } = pathValidation.data;
       const price = BigInt(queryValidation.data.price);
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
+      const positionHash = UniswapV3VaultPosition.createHash(chainId, vaultAddress, ownerAddress);
 
       const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(
         user.id,

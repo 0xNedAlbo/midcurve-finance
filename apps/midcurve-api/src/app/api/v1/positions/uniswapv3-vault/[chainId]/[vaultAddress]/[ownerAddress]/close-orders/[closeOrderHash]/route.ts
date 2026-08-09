@@ -14,7 +14,6 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
@@ -22,8 +21,9 @@ import {
   ApiErrorCode,
   ErrorCodeToHttpStatus,
   CloseOrderHashSchema,
+  GetUniswapV3VaultPositionParamsSchema,
 } from '@midcurve/api-shared';
-import { normalizeAddress } from '@midcurve/shared';
+import { UniswapV3VaultPosition } from '@midcurve/shared';
 import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import {
@@ -36,22 +36,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * Path params schema.
+ * The shared vault position path (which normalizes both addresses to EIP-55)
+ * plus the close order identifier.
  *
- * Addresses are normalized to EIP-55 so a lowercase address in the URL resolves
- * the same position as a checksummed one — the position hash is built from
- * checksummed addresses.
+ * This route introduced the normalization in #78 with its own copy of the
+ * schema; #80 moved it into the shared one, so the copy is gone.
  */
-const PathParamsSchema = z.object({
-  chainId: z.string().regex(/^\d+$/).transform(Number),
-  vaultAddress: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{40}$/)
-    .transform((value) => normalizeAddress(value)),
-  ownerAddress: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{40}$/)
-    .transform((value) => normalizeAddress(value)),
+const PathParamsSchema = GetUniswapV3VaultPositionParamsSchema.extend({
   closeOrderHash: CloseOrderHashSchema,
 });
 
@@ -114,7 +105,7 @@ export async function GET(
         paramsValidation.data;
 
       // 2. Find vault position by positionHash
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
+      const positionHash = UniswapV3VaultPosition.createHash(chainId, vaultAddress, ownerAddress);
       const position = await getUniswapV3VaultPositionService().findByPositionHash(
         user.id,
         positionHash

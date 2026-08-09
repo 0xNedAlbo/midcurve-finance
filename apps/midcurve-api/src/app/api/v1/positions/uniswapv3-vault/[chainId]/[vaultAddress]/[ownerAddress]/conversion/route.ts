@@ -26,6 +26,7 @@ import {
   adaptVaultEventsForConversion,
   type ConversionPositionInput,
   type VaultLedgerEventInput,
+  UniswapV3VaultPosition,
 } from '@midcurve/shared';
 import { serializeUniswapV3VaultPosition } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
@@ -70,7 +71,7 @@ export async function GET(
       }
 
       const { chainId, vaultAddress, ownerAddress } = validation.data;
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
+      const positionHash = UniswapV3VaultPosition.createHash(chainId, vaultAddress, ownerAddress);
 
       const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(
         user.id,
