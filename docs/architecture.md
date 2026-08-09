@@ -792,7 +792,32 @@ path and on an interrupted run — and `DATABASE_URL` itself is only read. A run
 killed outright leaves the database behind; the next run drops it before
 starting, so it self-heals rather than accumulating.
 
-#### Two things `prisma migrate` will not tell you
+#### Three things `prisma migrate` will not tell you
+
+**A removal cannot be verified by a check whose scope comes from the
+declaration.** `db:migrate:verify` — and `prisma migrate diff` underneath it —
+reads its field of view from `schemas = [...]` in `schema.prisma`. That is the
+same declaration a removal changes. Take a namespace out of the array and it
+leaves the check's scope; it does not leave the database.
+
+Concretely, when the `accounting` schema was removed in #98, `migrate diff`
+generated only the `public`-schema statements and said nothing about the six
+tables and the enum in `accounting`. A migration that omitted `DROP SCHEMA`
+would have verified clean, passed CI, and left the entire accounting layer
+standing on every fresh deploy — with `db:migrate:verify` reporting that the
+chain reproduces `schema.prisma` exactly, because by then it was no longer
+looking.
+
+This is not a defect in the check. It is a structural limit of comparing a
+declaration against a database, and it generalises past Prisma: **whatever the
+datamodel stops declaring, the diff stops seeing.** Data statements are the same
+category for the same reason — `migrate diff` compares structure, so a `DELETE`
+or `UPDATE` in a migration is invisible to it.
+
+So when a migration removes something the datamodel will no longer declare,
+write the drop by hand and check it by hand — apply the chain to a copy of a
+real database and query for what should be gone. Say so in the PR, because the
+green check does not mean what it usually means.
 
 **`migrate status` does not report database-only migrations.** If
 `_prisma_migrations` holds a row with no corresponding folder, `migrate status`
