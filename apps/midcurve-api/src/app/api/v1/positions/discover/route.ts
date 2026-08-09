@@ -25,10 +25,7 @@ import {
   getDomainEventPublisher,
   type PositionLifecyclePayload,
 } from '@midcurve/services';
-import {
-  getUniswapV3PositionService,
-  getUniswapV3StakingPositionService,
-} from '@/lib/services';
+import { getUniswapV3PositionService } from '@/lib/services';
 import { createPreflightResponse } from '@/lib/cors';
 import { apiLogger, apiLog } from '@/lib/logger';
 import type { Address } from 'viem';
@@ -81,27 +78,16 @@ export async function POST(request: NextRequest): Promise<Response> {
       const { chainIds, walletAddress } = validation.data;
       const targetAddress = (walletAddress ?? user.address) as Address;
 
-      // 2. Run NFT + staking-vault wallet scans in parallel.
-      const [nftResult, stakingResult] = await Promise.all([
-        getUniswapV3PositionService().discoverWalletPositions(
-          user.id,
-          targetAddress,
-          chainIds,
-        ),
-        getUniswapV3StakingPositionService().discoverWalletPositions(
-          user.id,
-          targetAddress,
-          chainIds,
-        ),
-      ]);
+      // 2. Run the NFT wallet scan.
+      const nftResult = await getUniswapV3PositionService().discoverWalletPositions(
+        user.id,
+        targetAddress,
+        chainIds,
+      );
 
       // 3. Publish position.created domain events for downstream processing
       const eventPublisher = getDomainEventPublisher();
-      const allNewPositions = [
-        ...nftResult.positions,
-        ...stakingResult.positions,
-      ];
-      for (const position of allNewPositions) {
+      for (const position of nftResult.positions) {
         await eventPublisher.createAndPublish<PositionLifecyclePayload>({
           type: 'position.created',
           entityType: 'position',
@@ -115,12 +101,12 @@ export async function POST(request: NextRequest): Promise<Response> {
         });
       }
 
-      // 4. Return aggregated stats across NFT + staking
+      // 4. Return scan stats
       const responseData: DiscoverPositionsData = {
-        found: nftResult.found + stakingResult.found,
-        imported: nftResult.imported + stakingResult.imported,
-        skipped: nftResult.skipped + stakingResult.skipped,
-        errors: nftResult.errors + stakingResult.errors,
+        found: nftResult.found,
+        imported: nftResult.imported,
+        skipped: nftResult.skipped,
+        errors: nftResult.errors,
       };
 
       apiLog.businessOperation(
