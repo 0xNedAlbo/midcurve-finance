@@ -107,6 +107,12 @@ export interface ConversionSummary {
   currentQuote: bigint;
   currentSpotPrice: bigint;
   isClosed: boolean;
+  /**
+   * Pool price at the moment the position was closed, null while it is open.
+   * Kept so that applyCurrentPrice() can tell "price this at close" from "price
+   * this now" without re-reading the ledger.
+   */
+  closePriceX96: bigint | null;
   /** Days position was active (for closed positions), null if still active */
   daysActive: number | null;
   segments: RebalancingSegment[];
@@ -238,7 +244,6 @@ export function computeUniswapV3ConversionSummary(
   let ammBoughtBase = 0n;
   let ammBoughtQuoteVolume = 0n;
   const ammBoughtPremium = 0n;
-  let totalPremium = 0n;
   let netRebalancingBase = 0n;
   let netRebalancingQuote = 0n;
 
@@ -384,68 +389,24 @@ export function computeUniswapV3ConversionSummary(
     }
   }
 
-  // Current holdings (or holdings at close for closed positions)
-  let currentHoldingsBase = 0n;
-  let currentHoldingsQuote = 0n;
-  let spotPriceX96 = currentSqrtPriceX96; // live price for active, overridden for closed
+  // For closed positions the reference price is the one at close, not the live
+  // pool price: holdings are 0 (already counted in withdrawnBase/Quote) and the
+  // comparison the UI draws is against the market as it was that day.
+  let closePriceX96: bigint | null = null;
   if (isClosed) {
-    // For closed positions: holdings are 0 (already counted in withdrawnBase/Quote).
-    // Use the price from the final DECREASE event as the reference spot price.
     for (let j = financialEvents.length - 1; j >= 0; j--) {
       const evt = financialEvents[j]!;
       if (evt.eventType === 'DECREASE_POSITION') {
         const closeCfg = parseConfig(evt);
         if (closeCfg.liquidityAfter === 0n) {
-          spotPriceX96 = closeCfg.sqrtPriceX96;
+          closePriceX96 = closeCfg.sqrtPriceX96;
           break;
         }
       }
     }
-  } else if (currentLiquidity > 0n) {
-    const currentAmounts = getTokenAmountsFromLiquidity(
-      currentLiquidity,
-      currentSqrtPriceX96,
-      tickLower,
-      tickUpper,
-    );
-    const mapped = toBaseQuote(
-      currentAmounts.token0Amount,
-      currentAmounts.token1Amount,
-      baseIsToken0,
-    );
-    currentHoldingsBase = mapped.base;
-    currentHoldingsQuote = mapped.quote;
   }
 
-  // Premium = unclaimed fees only.
-  // Fees are not compounded into liquidity. Once claimed, they leave the position
-  // and can go anywhere — they cannot count against the purchase or sale of assets
-  // inside the position. Only unclaimed fees are still inside the position.
-  totalPremium = feesToQuote(
-    BigInt(position.state.unclaimedFees0),
-    BigInt(position.state.unclaimedFees1),
-    currentSqrtPriceX96,
-    baseIsToken0,
-  );
-
-  // Assign all unclaimed fees to the last segment for execution price adjustment.
-  if (segments.length > 0) {
-    const attributedFees = segments.reduce((acc, s) => acc + s.feesEarned, 0n);
-    const unattributedFees = totalPremium - attributedFees;
-    if (unattributedFees > 0n) {
-      const last = segments[segments.length - 1]!;
-      last.feesEarned += unattributedFees;
-      if (last.deltaBase !== 0n) {
-        const effectiveQuote =
-          last.deltaBase < 0n
-            ? absBI(last.deltaQuote) + last.feesEarned
-            : absBI(last.deltaQuote) - last.feesEarned;
-        last.avgPrice = (effectiveQuote * scale) / absBI(last.deltaBase);
-      }
-    }
-  }
-
-  return {
+  const historySummary: ConversionSummary = {
     netDepositBase,
     netDepositQuote,
     netDepositAvgPrice:
@@ -465,19 +426,125 @@ export function computeUniswapV3ConversionSummary(
       netRebalancingBase !== 0n
         ? (absBI(netRebalancingQuote) * scale) / absBI(netRebalancingBase)
         : 0n,
-    totalPremium,
+    totalPremium: 0n,
     segments,
-    currentBase: currentHoldingsBase,
-    currentQuote: currentHoldingsQuote,
-    currentSpotPrice: baseIsToken0
-      ? pricePerToken0InToken1(spotPriceX96, baseTokenDecimals)
-      : pricePerToken1InToken0(spotPriceX96, baseTokenDecimals),
+    currentBase: 0n,
+    currentQuote: 0n,
+    currentSpotPrice: 0n,
     isClosed,
+    closePriceX96,
     daysActive,
     baseTokenSymbol: baseToken.symbol,
     quoteTokenSymbol: quoteToken.symbol,
     baseTokenDecimals,
     quoteTokenDecimals: quoteToken.decimals,
+  };
+
+  return applyCurrentPrice(historySummary, {
+    isToken0Quote: position.isToken0Quote,
+    tickLower,
+    tickUpper,
+    sqrtPriceX96: currentSqrtPriceX96,
+    liquidity: currentLiquidity,
+    unclaimedFees0: BigInt(position.state.unclaimedFees0),
+    unclaimedFees1: BigInt(position.state.unclaimedFees1),
+  });
+}
+
+// =============================================================================
+// Applying a current price
+//
+// Everything above is a replay of immutable history: each event carries the
+// sqrtPriceX96 it happened at. Only the handful of fields below depend on what
+// the pool costs *now*, which is why they are applied separately — a caller
+// holding a fresher price than the one the summary was computed with can
+// re-apply this and get numbers consistent with whatever else it renders from
+// that same price, instead of two views drifting apart on two reads.
+//
+// The transform is idempotent: it recomputes the price-dependent fields from
+// its inputs and rebuilds segment fee attribution from each segment's own
+// deltaBase/deltaQuote, so applying it twice is the same as applying it once.
+// =============================================================================
+
+export interface CurrentPriceParams {
+  isToken0Quote: boolean;
+  tickLower: number;
+  tickUpper: number;
+  /** Current pool price. Ignored for closed positions, which price at close. */
+  sqrtPriceX96: bigint;
+  /** Liquidity the holdings are computed from. For vaults, the holder's share. */
+  liquidity: bigint;
+  unclaimedFees0: bigint;
+  unclaimedFees1: bigint;
+}
+
+export function applyCurrentPrice(
+  summary: ConversionSummary,
+  params: CurrentPriceParams,
+): ConversionSummary {
+  const baseIsToken0 = !params.isToken0Quote;
+  const scale = 10n ** BigInt(summary.baseTokenDecimals);
+
+  // A closed position is priced at close, not now.
+  const spotPriceX96 = summary.isClosed
+    ? (summary.closePriceX96 ?? params.sqrtPriceX96)
+    : params.sqrtPriceX96;
+
+  let currentBase = 0n;
+  let currentQuote = 0n;
+  if (!summary.isClosed && params.liquidity > 0n) {
+    const amounts = getTokenAmountsFromLiquidity(
+      params.liquidity,
+      params.sqrtPriceX96,
+      params.tickLower,
+      params.tickUpper,
+    );
+    const mapped = toBaseQuote(amounts.token0Amount, amounts.token1Amount, baseIsToken0);
+    currentBase = mapped.base;
+    currentQuote = mapped.quote;
+  }
+
+  // Premium = unclaimed fees only.
+  // Fees are not compounded into liquidity. Once claimed, they leave the position
+  // and can go anywhere — they cannot count against the purchase or sale of assets
+  // inside the position. Only unclaimed fees are still inside the position.
+  const totalPremium = feesToQuote(
+    params.unclaimedFees0,
+    params.unclaimedFees1,
+    spotPriceX96,
+    baseIsToken0,
+  );
+
+  // Rebuild segments from their own deltas, then assign all unclaimed fees to
+  // the last one for execution price adjustment. Rebuilding rather than adding
+  // is what makes this safe to re-apply to an already-priced summary.
+  const segments = summary.segments.map((s) => ({
+    ...s,
+    feesEarned: 0n,
+    avgPrice: s.deltaBase !== 0n ? (absBI(s.deltaQuote) * scale) / absBI(s.deltaBase) : 0n,
+  }));
+
+  if (segments.length > 0 && totalPremium > 0n) {
+    const last = segments[segments.length - 1]!;
+    last.feesEarned = totalPremium;
+    if (last.deltaBase !== 0n) {
+      const effectiveQuote =
+        last.deltaBase < 0n
+          ? absBI(last.deltaQuote) + last.feesEarned
+          : absBI(last.deltaQuote) - last.feesEarned;
+      last.avgPrice = (effectiveQuote * scale) / absBI(last.deltaBase);
+    }
+  }
+
+  return {
+    ...summary,
+    totalPremium,
+    segments,
+    currentBase,
+    currentQuote,
+    currentSpotPrice: baseIsToken0
+      ? pricePerToken0InToken1(spotPriceX96, summary.baseTokenDecimals)
+      : pricePerToken1InToken0(spotPriceX96, summary.baseTokenDecimals),
   };
 }
 
@@ -519,6 +586,7 @@ export interface SerializedConversionSummary {
   currentQuote: string;
   currentSpotPrice: string;
   isClosed: boolean;
+  closePriceX96: string | null;
   daysActive: number | null;
   segments: SerializedRebalancingSegment[];
   baseTokenSymbol: string;
@@ -550,6 +618,7 @@ export function serializeConversionSummary(
     currentQuote: summary.currentQuote.toString(),
     currentSpotPrice: summary.currentSpotPrice.toString(),
     isClosed: summary.isClosed,
+    closePriceX96: summary.closePriceX96?.toString() ?? null,
     daysActive: summary.daysActive,
     segments: summary.segments.map((s) => ({
       index: s.index,
@@ -591,6 +660,7 @@ export function deserializeConversionSummary(
     currentQuote: BigInt(wire.currentQuote),
     currentSpotPrice: BigInt(wire.currentSpotPrice),
     isClosed: wire.isClosed,
+    closePriceX96: wire.closePriceX96 === null ? null : BigInt(wire.closePriceX96),
     daysActive: wire.daysActive,
     segments: wire.segments.map((s) => ({
       index: s.index,
