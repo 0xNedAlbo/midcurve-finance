@@ -10,7 +10,7 @@ import {
   calculatePositionValue,
   tickToPrice,
   tickToSqrtRatioX96,
-  priceToTick,
+  priceToSqrtRatioX96,
   pricePerToken0InToken1,
   pricePerToken1InToken0,
   UniswapV3Pool,
@@ -19,7 +19,6 @@ import {
 } from "@midcurve/shared";
 import type { PoolJSON } from "@midcurve/shared";
 import type { SwapConfig, SerializedCloseOrder } from "@midcurve/api-shared";
-import { TickMath } from "@uniswap/v3-sdk";
 
 /**
  * Position state interface - represents position at a specific price point
@@ -73,9 +72,6 @@ interface BasicPosition {
     token1: {
       config: { address: string };
       decimals: number;
-    };
-    config: {
-      tickSpacing: number;
     };
     state: {
       currentTick: number;
@@ -542,7 +538,7 @@ export function calculateBreakEvenPrice(
   for (let i = 0; i < maxIterations; i++) {
     const midPrice = (lowPrice + highPrice) / 2n;
 
-    // Validate midPrice is valid before converting to tick
+    // Validate midPrice is valid before converting to a sqrt price
     if (midPrice <= 0n) {
       console.warn(
         "calculateBreakEvenPrice: Binary search reached invalid price"
@@ -550,17 +546,19 @@ export function calculateBreakEvenPrice(
       break;
     }
 
-    // Convert price to tick
-    const tick = priceToTick(
-      midPrice,
-      position.pool.config.tickSpacing,
-      baseTokenConfig.address,
-      quoteTokenConfig.address,
-      Number(baseToken.decimals)
+    // Convert price → sqrtPriceX96 DIRECTLY (continuous, no tick snapping).
+    // Going through priceToTick() would snap to tickSpacing, quantizing the
+    // search grid to 0.6% (spacing 60) or 0.1% (spacing 10): the bisection
+    // would then keep halving the interval while evaluating the same handful of
+    // distinct values. Same reasoning as UniswapV3Position.simulatePnLAtPrice().
+    const sqrtPriceX96 = BigInt(
+      priceToSqrtRatioX96(
+        baseTokenConfig.address,
+        quoteTokenConfig.address,
+        Number(baseToken.decimals),
+        midPrice
+      ).toString()
     );
-
-    // Calculate position value at this price
-    const sqrtPriceX96 = BigInt(TickMath.getSqrtRatioAtTick(tick).toString());
     const positionValue = calculatePositionValue(
       liquidity,
       sqrtPriceX96,
