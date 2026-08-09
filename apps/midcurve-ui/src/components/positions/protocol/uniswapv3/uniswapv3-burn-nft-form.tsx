@@ -54,6 +54,13 @@ export function UniswapV3BurnNftForm({
   );
   const canBurn = isConnected && !isWrongNetwork && !isWrongAccount;
 
+  // The prompt only renders once connected and on the owner account, so a wrong
+  // network is the only reason that can reach a disabled button here.
+  const burnDisabledReason =
+    isWrongNetwork && chainConfig
+      ? `Switch your wallet to ${chainConfig.name} to burn this NFT.`
+      : undefined;
+
   // All hooks must be called before any early returns
   const burnPosition = useBurnPosition({
     tokenId: BigInt(config.nftId),
@@ -74,6 +81,7 @@ export function UniswapV3BurnNftForm({
     buttonLabel: 'Burn',
     chainId: config.chainId,
     enabled: canBurn,
+    disabledReason: burnDisabledReason,
     txHash: burnPosition.burnTxHash,
     isSubmitting: burnPosition.isBurning,
     isWaitingForConfirmation: burnPosition.isWaitingForBurn,
