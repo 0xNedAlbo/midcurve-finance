@@ -7,6 +7,7 @@
 
 import type { UniswapV3VaultPositionResponse } from './typed-response.js';
 import type { SerializedCloseOrder } from '../../automation/close-orders.js';
+import { normalizeAddress } from '@midcurve/shared';
 import { z } from 'zod';
 
 /**
@@ -36,7 +37,20 @@ export interface GetUniswapV3VaultPositionResponse extends UniswapV3VaultPositio
 // =============================================================================
 
 /**
- * Zod schema for validating path parameters
+ * Zod schema for validating path parameters.
+ *
+ * Addresses are normalized to EIP-55 so a lowercase address in the URL — a
+ * valid way to write an EVM address, and what most tooling produces —
+ * resolves the same position as a checksummed one.
+ *
+ * Ordering matters: `.regex()` runs before `.transform()`, and its pattern is
+ * strictly narrower than the one `normalizeAddress()` validates against. That
+ * is what keeps the throw inside the transform unreachable — a throw there
+ * would escape as a 500 rather than a 400.
+ *
+ * This is the outer guard. The inner one is
+ * `UniswapV3VaultPosition.createHash()`, which normalizes again for callers
+ * that never pass through a schema.
  */
 export const GetUniswapV3VaultPositionParamsSchema = z.object({
   chainId: z.string().transform((val, ctx) => {
@@ -53,11 +67,13 @@ export const GetUniswapV3VaultPositionParamsSchema = z.object({
 
   vaultAddress: z
     .string()
-    .regex(/^0x[0-9a-fA-F]{40}$/, 'vaultAddress must be a valid EVM address'),
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'vaultAddress must be a valid EVM address')
+    .transform((value) => normalizeAddress(value)),
 
   ownerAddress: z
     .string()
-    .regex(/^0x[0-9a-fA-F]{40}$/, 'ownerAddress must be a valid EVM address'),
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'ownerAddress must be a valid EVM address')
+    .transform((value) => normalizeAddress(value)),
 });
 
 export type GetUniswapV3VaultPositionParamsInput = z.input<
