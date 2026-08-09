@@ -3,10 +3,8 @@ import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUnisw
 import { useUniswapV3LiveMetrics } from "@/hooks/positions/uniswapv3/useUniswapV3LiveMetrics";
 import { useUniswapV3AutoRefresh } from "@/hooks/positions/uniswapv3/useUniswapV3AutoRefresh";
 import { useUniswapV3RefreshPosition } from "@/hooks/positions/uniswapv3/useUniswapV3RefreshPosition";
-import { usePositionAccounting } from "@/hooks/positions/uniswapv3/usePositionAccounting";
 import { PositionDetailHeader } from "../../position-detail-header";
 import { PositionDetailTabs } from "../../position-detail-tabs";
-import { PositionAccountingTab } from "../../accounting/position-accounting-tab";
 import { UniswapV3OverviewTab } from "./uniswapv3-overview-tab";
 import { UniswapV3AprTab } from "./uniswapv3-apr-tab";
 import { UniswapV3HistoryTab } from "./uniswapv3-history-tab";
@@ -20,14 +18,23 @@ interface UniswapV3PositionDetailProps {
   position: UniswapV3PositionData;
 }
 
-export type TabType = "overview" | "apr-analysis" | "pnl-analysis" | "conversion" | "automation" | "accounting" | "technical";
+const TAB_IDS = ["overview", "apr-analysis", "pnl-analysis", "conversion", "automation", "technical"] as const;
+
+export type TabType = (typeof TAB_IDS)[number];
+
+// The tab content is a flat list of `activeTab === ...` guards with no default
+// branch, so an unrecognised value renders an empty page. Anything not in
+// TAB_IDS is therefore normalised to the first tab.
+function toTabType(value: string | null): TabType {
+  return TAB_IDS.includes(value as TabType) ? (value as TabType) : "overview";
+}
 
 export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3PositionDetailProps) {
   const [searchParams] = useSearchParams();
 
   // Get tab from URL query params, default to 'overview'
   // Read directly from URL params (no state) so it updates when URL changes
-  const activeTab = (searchParams.get("tab") || "overview") as TabType;
+  const activeTab = toTabType(searchParams.get("tab"));
 
   // Extract chain ID and NFT ID for header
   const config = rawPosition.config as { chainId: number; nftId: number; tickLower: number; tickUpper: number };
@@ -41,9 +48,6 @@ export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3Posi
   // Manual refresh via POST endpoint (on-chain sync, not just DB refetch)
   const refreshMutation = useUniswapV3RefreshPosition();
   const isRefreshing = isAutoRefreshing || refreshMutation.isPending;
-
-  // Accounting report (balance sheet + P&L + journal entries)
-  const accountingQuery = usePositionAccounting(config.chainId, String(config.nftId));
 
   const handleRefresh = async () => {
     refreshMutation.mutate({
@@ -101,9 +105,6 @@ export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3Posi
         {activeTab === "pnl-analysis" && <UniswapV3HistoryTab position={position} />}
         {activeTab === "conversion" && <UniswapV3ConversionTab position={position} />}
         {activeTab === "automation" && <UniswapV3AutomationTab position={position} />}
-        {activeTab === "accounting" && (
-          <PositionAccountingTab data={accountingQuery.data} isLoading={accountingQuery.isLoading} />
-        )}
         {activeTab === "technical" && <UniswapV3TechnicalTab position={position} />}
       </div>
     </div>

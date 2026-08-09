@@ -13,7 +13,7 @@ The two position types currently rendered by the UI are:
 
 ## a) Positions List
 
-The list lives on the dashboard at [`/dashboard`](../apps/midcurve-ui/src/pages/DashboardPage.tsx) under the **Positions** tab. The page header shows the app title, a notification bell, and a user dropdown; the section header carries the **Add Position** dropdown (described in section [c](#c-add-position-menu)). Below it sits a tab switcher for **Positions** / **Accounting**; the latter is a separate dashboard summary, not position-specific.
+The list lives on the dashboard at [`/dashboard`](../apps/midcurve-ui/src/pages/DashboardPage.tsx). The page header shows the app title, a notification bell, and a user dropdown; the section header carries the **Add Position** dropdown (described in section [c](#c-add-position-menu)). The dashboard has no tab bar — the positions view is the whole page.
 
 The list itself is implemented in [`PositionList`](../apps/midcurve-ui/src/components/positions/position-list.tsx) and renders one row per position via protocol-specific card components.
 
@@ -67,7 +67,7 @@ Every card has a uniform three-region layout, with a per-protocol action row ben
 - **Three-dot menu** ([`PositionActionsMenu`](../apps/midcurve-ui/src/components/positions/position-actions-menu.tsx)) with three entries:
   - **Reload History** — opens a confirmation modal; re-imports all ledger events from chain/subgraph and rebuilds cumulatives
   - **Switch Quote Token** — opens a confirmation modal; flips `isToken0Quote` and recomputes every quote-denominated field
-  - **Delete Position** (destructive, red) — opens a confirmation modal; removes the tracking row (and ledger/journal cascades)
+  - **Delete Position** (destructive, red) — opens a confirmation modal; removes the tracking row (and the ledger cascade)
 
 **Bottom — protocol-specific action row.** See [Action button rows](#action-button-rows) below.
 
@@ -155,8 +155,7 @@ Both pages share the same skeleton: a [`PositionDetailHeader`](../apps/midcurve-
 | 3 | **APR Analysis** | `TrendingUp` | [`AprBreakdown`](../apps/midcurve-ui/src/components/positions/apr-breakdown.tsx) (time-weighted summary) + [`AprPeriodsTable`](../apps/midcurve-ui/src/components/positions/apr-periods-table.tsx) (per-`PositionAprPeriod` row). | Read-only |
 | 4 | **Conversion** | `Repeat` | [`ConversionSummary`](../apps/midcurve-ui/src/components/positions/protocol/uniswapv3/conversion-summary.tsx) (net deposits/withdrawals/holdings, average rebalancing direction, fee premium) + [`RebalancingHistoryTable`](../apps/midcurve-ui/src/components/positions/protocol/uniswapv3/rebalancing-history-table.tsx). | Read-only |
 | 5 | **Automation** | `Shield` | [`PositionCloseOrdersPanel`](../apps/midcurve-ui/src/components/positions/automation/PositionCloseOrdersPanel.tsx) / [`VaultCloseOrdersPanel`](../apps/midcurve-ui/src/components/positions/automation/VaultCloseOrdersPanel.tsx) listing existing close orders, plus the [`AutomationLogList`](../apps/midcurve-ui/src/components/positions/automation/AutomationLogList.tsx). | **Create / Edit / Cancel** close orders. Edit a close order via [`CloseOrderModal`](../apps/midcurve-ui/src/components/positions/automation/CloseOrderModal.tsx) (4-step wizard: Configure → Review → Processing → Success). Cancel via [`CancelOrderConfirmModal`](../apps/midcurve-ui/src/components/positions/automation/CancelOrderConfirmModal.tsx). |
-| 6 | **Accounting** | `BookOpen` | [`PositionAccountingTab`](../apps/midcurve-ui/src/components/positions/accounting/position-accounting-tab.tsx) (shared between protocols): balance sheet section, P&L section, journal entries audit trail. | Read-only |
-| 7 | **Technical Details** | `Settings` | Raw position config/state, on-chain references, copy-to-clipboard fields for addresses, NFPM/vault links to block explorer. | Read-only |
+| 6 | **Technical Details** | `Settings` | Raw position config/state, on-chain references, copy-to-clipboard fields for addresses, NFPM/vault links to block explorer. | Read-only |
 
 ### Tab actions versus card actions
 
@@ -209,8 +208,7 @@ Opens [`ScanPositionsModal`](../apps/midcurve-ui/src/components/positions/scan-p
 - **Auto-refresh stack**: 60s on-chain refresh + 3s DB polling + 5s live pool-price patch — applies to both card and detail page.
 - **Quote/base swap**: every quote-denominated metric flips when the user switches quote token; the underlying field is `isToken0Quote`.
 - **Archive lifecycle**: archive when empty, unarchive any time; archived positions only show the Archive button.
-- **Detail page skeleton**: 7-tab strip (Overview · PnL Analysis · APR Analysis · Conversion · Automation · Accounting · Technical Details), URL-driven active tab, shared header with Refresh.
-- **Accounting tab is fully shared** (`PositionAccountingTab`) — protocol-agnostic.
+- **Detail page skeleton**: 6-tab strip (Overview · PnL Analysis · APR Analysis · Conversion · Automation · Technical Details), URL-driven active tab, shared header with Refresh. An unrecognised `?tab=` value falls back to Overview.
 - **Close orders UI**: SL/TP buttons in the card row, full close-order panel + 4-step wizard modal in the Automation tab, automation log feed.
 - **Connected-wallet gating**: the action row collapses to "Archive only" when the connected wallet does not match the on-chain owner.
 
@@ -282,7 +280,6 @@ When introducing a new `protocol` discriminator (e.g. `aerodrome`, `orca-clmm`, 
   - [ ] `{proto}-conversion-tab.tsx` — protocol-specific conversion summary + history (or omit if conversion is meaningless for the protocol)
   - [ ] `{proto}-automation-tab.tsx` — close-orders panel + automation logs
   - [ ] `{proto}-technical-tab.tsx` — raw config/state with explorer links
-- [ ] **Accounting tab is shared** ([`PositionAccountingTab`](../apps/midcurve-ui/src/components/positions/accounting/position-accounting-tab.tsx)) — just wire up a `use{Proto}PositionAccounting` hook
 
 ### 6. Wizards
 - [ ] Increase deposit wizard at `components/positions/wizard/increase-deposit/{proto}/` (4 steps: Configure → Swap → Transaction)
@@ -300,7 +297,7 @@ When introducing a new `protocol` discriminator (e.g. `aerodrome`, `orca-clmm`, 
 - [ ] `use{Proto}AutoRefresh(...)` — fires `/refresh` on mount + every 60s
 - [ ] `use{Proto}LiveMetrics(position)` — patches live pool price every 5s
 - [ ] `use{Proto}RefreshPosition` — manual refresh mutation
-- [ ] `use{Proto}Ledger`, `use{Proto}AprPeriods`, `use{Proto}Conversion`, `use{Proto}PositionAccounting`
+- [ ] `use{Proto}Ledger`, `use{Proto}AprPeriods`, `use{Proto}Conversion`
 - [ ] `useImport{Proto}Position` (mutation) and `useDiscover{Proto}Positions` if scanning is supported
 
 ### 9. Add Position dropdown
@@ -334,7 +331,6 @@ The pages below exist in the SPA but are **not** about positions and are deliber
 | [`ApiKeysPage`](../apps/midcurve-ui/src/pages/ApiKeysPage.tsx) | `/api-keys` | Create/revoke `mck_…` API keys for the MCP server and other clients | `mcp-and-api-keys.md` |
 | [`NotificationsPage`](../apps/midcurve-ui/src/pages/NotificationsPage.tsx) | `/notifications` | In-app notification feed (range exits, close-order executions); webhook configuration | `notifications.md` |
 | [Notification bell](../apps/midcurve-ui/src/components/notifications/notification-bell.tsx) | (header) | Compact unread-count badge on the dashboard header | `notifications.md` |
-| [Accounting tab on dashboard](../apps/midcurve-ui/src/components/accounting/accounting-summary.tsx) | `/dashboard?tab=accounting` | Cross-position accounting summary (not the per-position Accounting tab — that one *is* covered here) | `accounting.md` |
 | [`WizardExamplePage`](../apps/midcurve-ui/src/pages/WizardExamplePage.tsx) | `/wizard-example` | Internal example/playground for the wizard primitives | (developer-only, no user doc planned) |
 
 The **swap** UI (under [`components/swap/`](../apps/midcurve-ui/src/components/swap/)) is also out of scope here — it is a standalone token-swap surface, not a position-management view.

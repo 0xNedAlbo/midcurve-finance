@@ -19,7 +19,6 @@
     "db:migrate:verify": "sh ./scripts/verify-migration-chain.sh",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:seed:accounts": "tsx prisma/seed-accounts.ts",
     "yalc:publish": "npm run db:generate && yalc publish --push"
   },
   "dependencies": {

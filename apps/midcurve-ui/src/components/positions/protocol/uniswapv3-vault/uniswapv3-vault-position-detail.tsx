@@ -3,9 +3,7 @@ import type { UniswapV3VaultPositionData } from "@/hooks/positions/uniswapv3-vau
 import { useUniswapV3VaultLiveMetrics } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultLiveMetrics";
 import { useUniswapV3VaultAutoRefresh } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultAutoRefresh";
 import { useUniswapV3VaultRefreshPosition } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultRefreshPosition";
-import { useVaultPositionAccounting } from "@/hooks/positions/uniswapv3-vault/useVaultPositionAccounting";
 import { PositionDetailHeader } from "../../position-detail-header";
-import { PositionAccountingTab } from "../../accounting/position-accounting-tab";
 import { UniswapV3VaultOverviewTab } from "./uniswapv3-vault-overview-tab";
 import { UniswapV3VaultAprTab } from "./uniswapv3-vault-apr-tab";
 import { UniswapV3VaultHistoryTab } from "./uniswapv3-vault-history-tab";
@@ -13,7 +11,7 @@ import { UniswapV3VaultTechnicalTab } from "./uniswapv3-vault-technical-tab";
 import { UniswapV3VaultAutomationTab } from "./uniswapv3-vault-automation-tab";
 import { UniswapV3VaultConversionTab } from "./uniswapv3-vault-conversion-tab";
 import { getChainMetadataByChainId } from "@/config/chains";
-import { BarChart3, Clock, TrendingUp, Settings, Shield, Repeat, BookOpen } from "lucide-react";
+import { BarChart3, Clock, TrendingUp, Settings, Shield, Repeat } from "lucide-react";
 import type {
   UniswapV3VaultPositionConfigResponse,
   UniswapV3VaultPositionStateResponse,
@@ -23,24 +21,30 @@ interface UniswapV3VaultPositionDetailProps {
   position: UniswapV3VaultPositionData;
 }
 
-export type VaultTabType = "overview" | "pnl-analysis" | "apr-analysis" | "conversion" | "automation" | "accounting" | "technical";
-
 const vaultTabs = [
   { id: "overview", icon: BarChart3, label: "Overview" },
   { id: "pnl-analysis", icon: Clock, label: "PnL Analysis" },
   { id: "apr-analysis", icon: TrendingUp, label: "APR Analysis" },
   { id: "conversion", icon: Repeat, label: "Conversion" },
   { id: "automation", icon: Shield, label: "Automation" },
-  { id: "accounting", icon: BookOpen, label: "Accounting" },
   { id: "technical", icon: Settings, label: "Technical Details" },
 ] as const;
+
+export type VaultTabType = (typeof vaultTabs)[number]["id"];
+
+// The tab content is a flat list of `activeTab === ...` guards with no default
+// branch, so an unrecognised value renders an empty page. Anything not in
+// vaultTabs is therefore normalised to the first tab.
+function toVaultTabType(value: string | null): VaultTabType {
+  return vaultTabs.some((tab) => tab.id === value) ? (value as VaultTabType) : "overview";
+}
 
 export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV3VaultPositionDetailProps) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
   // Get tab from URL query params, default to 'overview'
-  const activeTab = (searchParams.get("tab") || "overview") as VaultTabType;
+  const activeTab = toVaultTabType(searchParams.get("tab"));
 
   // Extract chain ID and vault address for header
   const config = rawPosition.config as UniswapV3VaultPositionConfigResponse;
@@ -55,13 +59,6 @@ export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV
   // Manual refresh via POST endpoint (on-chain sync, not just DB refetch)
   const refreshMutation = useUniswapV3VaultRefreshPosition();
   const isRefreshing = isAutoRefreshing || refreshMutation.isPending;
-
-  // Accounting report (balance sheet + P&L + journal entries)
-  const accountingQuery = useVaultPositionAccounting(
-    config.chainId,
-    config.vaultAddress,
-    config.ownerAddress,
-  );
 
   const handleRefresh = async () => {
     refreshMutation.mutate({
@@ -170,9 +167,6 @@ export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV
         {activeTab === "apr-analysis" && <UniswapV3VaultAprTab position={position} />}
         {activeTab === "pnl-analysis" && <UniswapV3VaultHistoryTab position={position} />}
         {activeTab === "automation" && <UniswapV3VaultAutomationTab position={position} />}
-        {activeTab === "accounting" && (
-          <PositionAccountingTab data={accountingQuery.data} isLoading={accountingQuery.isLoading} />
-        )}
         {activeTab === "technical" && <UniswapV3VaultTechnicalTab position={position} />}
       </div>
     </div>

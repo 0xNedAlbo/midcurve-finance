@@ -19,7 +19,6 @@ import { buildGetUserTool } from './tools/get-user.js';
 import { buildListPositionsTool } from './tools/list-positions.js';
 import { buildGetPositionTool } from './tools/get-position.js';
 import { buildGetPositionConversionTool } from './tools/get-position-conversion.js';
-import { buildGetPositionAccountingTool } from './tools/get-position-accounting.js';
 import { buildGetPositionAprTool } from './tools/get-position-apr.js';
 import { buildSimulatePositionAtPriceTool } from './tools/simulate-position-at-price.js';
 import { buildGeneratePositionPnlCurveTool } from './tools/generate-position-pnl-curve.js';
@@ -27,7 +26,6 @@ import { buildComputeTokenAmountsForRangeTool } from './tools/compute-token-amou
 import { buildSimulateSwapOutputTool } from './tools/simulate-swap-output.js';
 import { buildComputeLiquidityForBudgetTool } from './tools/compute-liquidity-for-budget.js';
 import { buildConvertPriceAndTickTool } from './tools/convert-price-and-tick.js';
-import { buildGetPnlTool } from './tools/get-pnl.js';
 import { buildListCloseOrdersTool } from './tools/list-close-orders.js';
 import { buildGetPoolTool } from './tools/get-pool.js';
 import { buildSearchPoolsTool } from './tools/search-pools.js';
@@ -91,7 +89,6 @@ async function main(): Promise<void> {
   register(buildListPositionsTool(client));
   register(buildGetPositionTool(client));
   register(buildGetPositionConversionTool(client));
-  register(buildGetPositionAccountingTool(client));
   register(buildGetPositionAprTool(client));
   register(buildSimulatePositionAtPriceTool(client));
   register(buildGeneratePositionPnlCurveTool(client));
@@ -99,7 +96,6 @@ async function main(): Promise<void> {
   register(buildSimulateSwapOutputTool(client));
   register(buildComputeLiquidityForBudgetTool(client));
   register(buildConvertPriceAndTickTool(client));
-  register(buildGetPnlTool(client));
   register(buildListCloseOrdersTool(client));
   register(buildGetPoolTool(client));
   register(buildSearchPoolsTool(client));

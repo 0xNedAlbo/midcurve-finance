@@ -7,7 +7,7 @@ export function buildGetUserTool(client: ApiClient) {
     config: {
       title: 'Get current user',
       description:
-        'Returns the wallet address, name, and reporting currency of the user this API key belongs to. ' +
+        'Returns the wallet address and name of the user this API key belongs to. ' +
         'Useful as a connectivity check or to confirm which account you are operating on.',
     },
     handler: async () => {
@@ -15,7 +15,6 @@ export function buildGetUserTool(client: ApiClient) {
         id: string;
         address: string;
         name?: string | null;
-        reportingCurrency?: string;
         createdAt?: string;
       }>('/api/v1/user/me');
       return {

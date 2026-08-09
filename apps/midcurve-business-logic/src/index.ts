@@ -5,7 +5,6 @@
  */
 
 import { businessLogicLogger } from './lib/logger';
-import { JournalService } from '@midcurve/services';
 import { RuleManager } from './workers';
 
 const log = businessLogicLogger.child({ component: 'Main' });
@@ -69,11 +68,6 @@ async function main(): Promise<void> {
     const { initAppConfig } = await import('@midcurve/services');
     await initAppConfig();
     log.info({ msg: 'AppConfig initialized' });
-
-    // Ensure chart of accounts is seeded before any rules run
-    const journalService = JournalService.getInstance();
-    const accountCount = await journalService.ensureChartOfAccounts();
-    log.info({ accountCount, msg: 'Chart of accounts seeded' });
 
     // Create and start rule manager
     ruleManager = new RuleManager();

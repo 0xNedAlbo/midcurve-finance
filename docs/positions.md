@@ -92,7 +92,7 @@ Cost basis is **never** computed from the user's deposits in fiat — it is accu
 | `previousId` | Doubly-linked event chain — events are processed in causal order |
 | `isIgnored` / `ignoredReason` | Events that occurred outside the user's wallet ownership are ignored for financials (e.g. when an NFT was transferred away and back) |
 
-The chain is the single source of truth: rebuilding the Position row from an empty start by replaying the chain must reproduce the cumulative fields. This invariant is what `POST /positions/.../reload-history` and the `UniswapV3ReconcileCostBasisRule` verify.
+The chain is the single source of truth: rebuilding the Position row from an empty start by replaying the chain must reproduce the cumulative fields. This invariant is what `POST /positions/.../reload-history` exercises.
 
 ### Event taxonomy
 
@@ -160,7 +160,6 @@ User-driven operations are exposed under `/api/v1/positions/...` and are uniform
 |---|---|---|
 | Ledger | `GET /positions/<protocol>/<id>/ledger` | Paginated `PositionLedgerEventJSON[]` |
 | APR | `GET /positions/<protocol>/<id>/apr` | Per-period APR + time-weighted summary |
-| Accounting | `GET /positions/<protocol>/<id>/accounting` | Journal entries (double-entry), realized P&L breakdown, audit trail |
 | Conversion | `GET /positions/<protocol>/<id>/conversion` (NFT only) | Net deposits/withdrawals/holdings, rebalancing direction, fee premium |
 | Single-price simulation | `POST /positions/<protocol>/<id>/simulate` | `PnLSimulationResult` at a hypothetical price |
 | PnL curve | `GET /positions/<protocol>/<id>/pnl-curve` | List of `(price, value, pnl, pnlPercent, phase)` across a price range |
@@ -231,16 +230,11 @@ The whole flow is one transaction. Slippage protection comes from the user-suppl
 
 The automation EOA (the wallet that submits close-order transactions) is kept funded across all chains by the `RefuelOperatorRule` in business-logic, which draws from the gas escrow contract. Without this rule, automation can't execute; with it, the user only deposits gas once per chain and forgets about it.
 
-### Accounting pipeline
+### Wallet-set changes
 
-Every ledger event posted to a position (manual or automated) flows into the journal-entry pipeline run by business-logic:
+Ownership of an NFT position is tracked per ledger event via `isIgnored` flags that depend on the user's full wallet set, so changing that set invalidates every running total. `UniswapV3ReevaluateOnWalletChangeRule` in business-logic consumes `wallet.added` / `wallet.removed` and recalculates ledger aggregates across the user's UniswapV3 NFT positions.
 
-- `UniswapV3PostJournalEntriesRule` — writes double-entry `JournalEntry` / `JournalLine` rows for every NFT-position event.
-- `UniswapV3VaultPostJournalEntriesRule` — vault variant.
-- `UniswapV3ReconcileCostBasisRule` — periodic reconciliation against on-chain truth.
-- `UniswapV3ReevaluateOnWalletChangeRule` — re-evaluates ownership when a user adds/removes a wallet.
-
-The `/positions/.../accounting` endpoint exposes the resulting journal in the user's reporting currency.
+Vault positions are unaffected: they are tied to a single `ownerAddress` and their aggregates do not depend on the wallet set.
 
 ---
 

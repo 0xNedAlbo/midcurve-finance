@@ -89,7 +89,7 @@ midcurve-finance/
 │   ├── midcurve-api/             # Next.js REST API backend
 │   ├── midcurve-automation/      # Range monitoring & close-order execution
 │   ├── midcurve-onchain-data/    # Real-time blockchain event subscriptions/pollers
-│   ├── midcurve-business-logic/  # Event-driven rules, accounting, scheduled tasks
+│   ├── midcurve-business-logic/  # Event-driven rules, scheduled tasks
 │   ├── midcurve-signer/          # Transaction signing service
 │   ├── midcurve-contracts/       # Solidity smart contracts (Foundry)
 │   └── midcurve-mcp-server/      # Read-only MCP server for Claude clients
@@ -139,8 +139,8 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
   - Pool & pool-price types (`Pool`, `UniswapV3Pool`, `PoolPrice`)
   - Positions (`Position`, `UniswapV3Position`, vault positions), simulation result types
   - Position ledger events, APR period and summary types
-  - User, user settings, API key, wallet-perimeter types
-  - Accounting types (journal entries, token lots), automation types
+  - User, user settings, API key, wallet types
+  - Automation types
   - Shared-contract and on-chain-subscription types
 
 - **Utilities & Math:**
@@ -178,7 +178,6 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
   - **Pools:** `pool`, `pool-price`, `pool-search`, `favorite-pool`
   - **Positions:** `position`, `position-list`, `position-ledger`, `position-apr`
   - **Automation:** `automation`, `close-order`, `swap-router`
-  - **Accounting:** `journal` (journal entries, account definitions)
   - **Notifications:** `notifications` (in-app + webhook)
   - **Other:** `cache`, `system-config`, `block`, `transaction`, `volatility`
 
@@ -275,8 +274,7 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
   - **Identity & auth:** `User`, `Session`, `ApiKey`, `UserSettings`, `UserWallet`, `UserAllowListEntry`
   - **Tokens:** `Token`, `CoingeckoToken`
   - **Positions (UniswapV3):** `Position`, `PositionLedgerEvent`, `PositionAprPeriod`, `PositionRangeStatus`
-  - **Close orders & automation:** `CloseOrder`, `AutomationLog`, `OnchainDataSubscribers`, `SharedContract`, `KnownProtocolAddress`
-  - **Accounting (journal-entry pipeline):** `AccountDefinition`, `JournalEntry`, `JournalLine`, `TokenLot`, `TokenLotState`, `TokenLotDisposal` (with `TokenLotTransferEvent` enum)
+  - **Close orders & automation:** `CloseOrder`, `AutomationLog`, `OnchainDataSubscribers`, `SharedContract`
   - **Notifications:** `UserNotification`, `UserWebhookConfig` (with `NotificationEventType` enum)
   - **Domain events (outbox pattern):** `DomainEvent`, `DomainEventOutbox`
   - **Infrastructure:** `Cache` (distributed cache), `SystemConfig` (e.g. WalletConnect project ID set via setup wizard)
@@ -376,7 +374,6 @@ midcurve-ui/
 - `/api/v1/transactions/*` - On-chain transaction status / lookups
 - `/api/v1/swap/*` - DEX swap quotes and execution helpers
 - `/api/v1/automation/*` - Close orders, range alerts, vault positions
-- `/api/v1/accounting/*` - Journal entries, P&L statements, cost-basis reporting
 - `/api/v1/notifications/*` - In-app notifications and webhook configs
 
 **Key Characteristics:**
@@ -542,14 +539,8 @@ midcurve-onchain-data/
 - `RefreshCoingeckoTokensRule` — daily token-list refresh from CoinGecko
 - `EnrichCoingeckoTokensRule` — incremental enrichment of newly seen tokens
 
-*Accounting — UniswapV3 NFT positions (`accounting/uniswapv3/`):*
-- `UniswapV3PostJournalEntriesRule` — posts double-entry journal entries from position ledger events
-- `UniswapV3ReconcileCostBasisRule` — periodic cost-basis reconciliation against on-chain truth
-- `UniswapV3ReevaluateOnWalletChangeRule` — re-evaluates positions when a user adds/removes a wallet
-- `UniswapV3JournalBackfillRule` — backfills journal entries for historical positions
-
-*Accounting — UniswapV3 vault positions (`accounting/uniswapv3-vault/`):*
-- `UniswapV3VaultPostJournalEntriesRule` — vault-position variant of the journal-posting rule
+*UniswapV3 NFT positions (`positions/uniswapv3/`):*
+- `UniswapV3ReevaluateOnWalletChangeRule` — recalculates ledger aggregates and `isIgnored` flags across a user's NFT positions when their wallet set changes. Vault positions are unaffected: their aggregates do not depend on the wallet set.
 
 *Close orders (`close-orders/uniswapv3/`):*
 - `UniswapV3ProcessCloseOrderEventsRule` — syncs close orders with on-chain state, emits domain events
@@ -562,7 +553,6 @@ midcurve-onchain-data/
 - RuleRegistry - Manages rule registration, startup, shutdown
 - SchedulerService - Singleton cron scheduler with execution metrics
 - Consumes from RabbitMQ: `pool-prices`, `position-liquidity-events`, `close-order-events`, plus the domain-events exchange
-- Accounting pipeline: ledger events → journal entries → cost-basis reconciliation → P&L reporting
 
 **Directory Structure:**
 ```
@@ -595,9 +585,9 @@ midcurve-business-logic/
 - **Pino** - Structured logging
 - **Zod** - Tool input validation
 
-**Tools exposed (16, all read-only):**
-- *Identity & portfolio:* `get_user`, `list_positions`, `get_position`, `get_pnl`, `list_close_orders`, `get_pool`, `list_notifications`
-- *Per-position deep-dive:* `get_position_conversion`, `get_position_accounting`, `get_position_apr`
+**Tools exposed (15, all read-only):**
+- *Identity & portfolio:* `get_user`, `list_positions`, `get_position`, `list_close_orders`, `get_pool`, `list_notifications`
+- *Per-position deep-dive:* `get_position_conversion`, `get_position_apr`
 - *Per-position simulation:* `simulate_position_at_price`, `generate_position_pnl_curve`
 - *Pure-math helpers:* `compute_token_amounts_for_range`, `simulate_swap_output`, `compute_liquidity_for_budget`, `convert_price_and_tick`
 
@@ -728,7 +718,7 @@ midcurve-contracts/
 ┌─────────────────────────────────────┐
 │     @midcurve/shared (Types)        │  <- Pure types (no dependencies)
 │  - Token, Pool, Position            │
-│  - User, accounting, automation     │
+│  - User, automation                 │
 │  - Utilities (address, math)        │
 └─────────────────────────────────────┘
            ↑ imports          ↑ imports
@@ -802,7 +792,32 @@ path and on an interrupted run — and `DATABASE_URL` itself is only read. A run
 killed outright leaves the database behind; the next run drops it before
 starting, so it self-heals rather than accumulating.
 
-#### Two things `prisma migrate` will not tell you
+#### Three things `prisma migrate` will not tell you
+
+**A removal cannot be verified by a check whose scope comes from the
+declaration.** `db:migrate:verify` — and `prisma migrate diff` underneath it —
+reads its field of view from `schemas = [...]` in `schema.prisma`. That is the
+same declaration a removal changes. Take a namespace out of the array and it
+leaves the check's scope; it does not leave the database.
+
+Concretely, when the `accounting` schema was removed in #98, `migrate diff`
+generated only the `public`-schema statements and said nothing about the six
+tables and the enum in `accounting`. A migration that omitted `DROP SCHEMA`
+would have verified clean, passed CI, and left the entire accounting layer
+standing on every fresh deploy — with `db:migrate:verify` reporting that the
+chain reproduces `schema.prisma` exactly, because by then it was no longer
+looking.
+
+This is not a defect in the check. It is a structural limit of comparing a
+declaration against a database, and it generalises past Prisma: **whatever the
+datamodel stops declaring, the diff stops seeing.** Data statements are the same
+category for the same reason — `migrate diff` compares structure, so a `DELETE`
+or `UPDATE` in a migration is invisible to it.
+
+So when a migration removes something the datamodel will no longer declare,
+write the drop by hand and check it by hand — apply the chain to a copy of a
+real database and query for what should be gone. Say so in the PR, because the
+green check does not mean what it usually means.
 
 **`migrate status` does not report database-only migrations.** If
 `_prisma_migrations` holds a row with no corresponding folder, `migrate status`

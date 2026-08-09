@@ -81,7 +81,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams): Pro
       walletHash: wallet.walletHash,
     });
 
-    // Publish wallet.removed domain event for accounting re-evaluation
+    // Publish wallet.removed domain event so ledger aggregates are recalculated
     const eventPublisher = getDomainEventPublisher();
     await eventPublisher.createAndPublish<WalletChangedPayload>({
       type: 'wallet.removed',

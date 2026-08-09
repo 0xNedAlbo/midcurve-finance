@@ -142,7 +142,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       address: normalizedAddress,
     });
 
-    // Publish wallet.added domain event for accounting re-evaluation
+    // Publish wallet.added domain event so ledger aggregates are recalculated
     const eventPublisher = getDomainEventPublisher();
     await eventPublisher.createAndPublish<WalletChangedPayload>({
       type: 'wallet.added',

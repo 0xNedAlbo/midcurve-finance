@@ -43,8 +43,16 @@ pnpm db:studio          # Inspect database
 
 `db:migrate:verify` runs on every PR; run it locally after writing a migration
 to get the answer sooner. `prisma migrate status` does not report database-only
-migration rows, so a clean status is not evidence of a clean history — see
-[docs/architecture.md](docs/architecture.md), "Verifying the migration chain".
+migration rows, so a clean status is not evidence of a clean history.
+
+**Removals are not covered by either check.** `migrate diff` reads its scope
+from `schemas = [...]` in `schema.prisma`, so anything the datamodel stops
+declaring also stops being diffed — dropping a schema, and any `DELETE`/`UPDATE`,
+must be hand-written and hand-checked. A migration that omits them still
+verifies clean.
+
+Both facts in [docs/architecture.md](docs/architecture.md), "Verifying the
+migration chain".
 
 ## Architecture Docs
 For detailed architecture, auth flows, and design decisions:

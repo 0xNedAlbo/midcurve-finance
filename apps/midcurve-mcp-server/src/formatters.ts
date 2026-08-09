@@ -8,7 +8,6 @@ import {
   formatDateTime,
   formatPercentage,
   formatRelativeTime,
-  formatReportingAmount,
   formatTokenAmount,
   formatUSDValue,
   tickToPrice,
@@ -20,7 +19,6 @@ import type {
   AprPeriodsResponse,
   PairSigmaResult,
   PoolSearchResultItem,
-  PositionAccountingResponse,
   SerializedCloseOrder,
   SigmaFilterBlock,
   UniswapV3PoolWire,
@@ -272,87 +270,6 @@ export function formatPosition(p: UniswapV3PositionRaw): Record<string, unknown>
   };
 }
 
-interface PnlPositionRaw {
-  positionRef: string;
-  nftId: string;
-  realizedFromWithdrawals: string;
-  realizedFromCollectedFees: string;
-  realizedFromFxEffect: string;
-  netPnl: string;
-}
-
-interface PnlInstrumentRaw {
-  instrumentRef: string;
-  poolSymbol: string;
-  protocol: string;
-  chainId: number;
-  feeTier: string;
-  realizedFromWithdrawals: string;
-  realizedFromCollectedFees: string;
-  realizedFromFxEffect: string;
-  netPnl: string;
-  positions: PnlPositionRaw[];
-}
-
-interface PnlResponseRaw {
-  period: string;
-  startDate: string;
-  endDate: string;
-  reportingCurrency: string;
-  realizedFromWithdrawals: string;
-  realizedFromCollectedFees: string;
-  realizedFromFxEffect: string;
-  netPnl: string;
-  instruments: PnlInstrumentRaw[];
-}
-
-export function formatPnl(pnl: PnlResponseRaw): Record<string, unknown> {
-  const cur = pnl.reportingCurrency;
-  return {
-    period: pnl.period,
-    startDate: timestamp(pnl.startDate),
-    endDate: timestamp(pnl.endDate),
-    reportingCurrency: cur,
-    portfolio: {
-      netPnl: formatReportingAmount(pnl.netPnl, cur),
-      netPnlRaw: pnl.netPnl,
-      realizedFromWithdrawals: formatReportingAmount(pnl.realizedFromWithdrawals, cur),
-      realizedFromWithdrawalsRaw: pnl.realizedFromWithdrawals,
-      realizedFromCollectedFees: formatReportingAmount(pnl.realizedFromCollectedFees, cur),
-      realizedFromCollectedFeesRaw: pnl.realizedFromCollectedFees,
-      realizedFromFxEffect: formatReportingAmount(pnl.realizedFromFxEffect, cur),
-      realizedFromFxEffectRaw: pnl.realizedFromFxEffect,
-    },
-    instruments: pnl.instruments.map((inst) => ({
-      instrumentRef: inst.instrumentRef,
-      poolSymbol: inst.poolSymbol,
-      protocol: inst.protocol,
-      chainId: inst.chainId,
-      feeTier: inst.feeTier,
-      netPnl: formatReportingAmount(inst.netPnl, cur),
-      netPnlRaw: inst.netPnl,
-      realizedFromWithdrawals: formatReportingAmount(inst.realizedFromWithdrawals, cur),
-      realizedFromWithdrawalsRaw: inst.realizedFromWithdrawals,
-      realizedFromCollectedFees: formatReportingAmount(inst.realizedFromCollectedFees, cur),
-      realizedFromCollectedFeesRaw: inst.realizedFromCollectedFees,
-      realizedFromFxEffect: formatReportingAmount(inst.realizedFromFxEffect, cur),
-      realizedFromFxEffectRaw: inst.realizedFromFxEffect,
-      positions: inst.positions.map((pos) => ({
-        positionRef: pos.positionRef,
-        nftId: pos.nftId,
-        netPnl: formatReportingAmount(pos.netPnl, cur),
-        netPnlRaw: pos.netPnl,
-        realizedFromWithdrawals: formatReportingAmount(pos.realizedFromWithdrawals, cur),
-        realizedFromWithdrawalsRaw: pos.realizedFromWithdrawals,
-        realizedFromCollectedFees: formatReportingAmount(pos.realizedFromCollectedFees, cur),
-        realizedFromCollectedFeesRaw: pos.realizedFromCollectedFees,
-        realizedFromFxEffect: formatReportingAmount(pos.realizedFromFxEffect, cur),
-        realizedFromFxEffectRaw: pos.realizedFromFxEffect,
-      })),
-    })),
-  };
-}
-
 /**
  * Pool detail response from `GET /api/v1/pools/uniswapv3/:chainId/:address`.
  * Matches the wire shape: serialized pool nested under `pool`, with optional
@@ -593,11 +510,10 @@ export function formatPoolSearchResult(
   };
 }
 
-export function formatUser(user: { id: string; address: string; name?: string | null; reportingCurrency?: string; createdAt?: string }): Record<string, unknown> {
+export function formatUser(user: { id: string; address: string; name?: string | null; createdAt?: string }): Record<string, unknown> {
   return {
     address: user.address,
     name: user.name ?? null,
-    reportingCurrency: user.reportingCurrency ?? null,
     memberSince: timestamp(user.createdAt),
     userId: user.id,
   };
@@ -732,74 +648,6 @@ export function formatConversionSummary(
     totalPremium: premiumNonZero ? quoteAmt(summary.totalPremium) : null,
     totalPremiumRaw: premiumNonZero ? summary.totalPremium : null,
     segments: summary.segments.map((s) => formatSegment(s, summary)),
-  };
-}
-
-// =============================================================================
-// Position Accounting
-// =============================================================================
-
-export function formatPositionAccounting(
-  report: PositionAccountingResponse,
-): Record<string, unknown> {
-  const cur = report.reportingCurrency;
-  const amount = (raw: string) => formatReportingAmount(raw, cur);
-
-  const assets = report.balanceSheet.assets;
-  const equity = report.balanceSheet.equity;
-  const re = equity.retainedEarnings;
-  const pnl = report.pnl;
-
-  return {
-    positionRef: report.positionRef,
-    reportingCurrency: cur,
-    balanceSheet: {
-      assets: {
-        lpPositionAtCost: amount(assets.lpPositionAtCost),
-        lpPositionAtCostRaw: assets.lpPositionAtCost,
-        totalAssets: amount(assets.totalAssets),
-        totalAssetsRaw: assets.totalAssets,
-      },
-      equity: {
-        contributedCapital: amount(equity.contributedCapital),
-        contributedCapitalRaw: equity.contributedCapital,
-        capitalReturned: amount(equity.capitalReturned),
-        capitalReturnedRaw: equity.capitalReturned,
-        retainedEarnings: {
-          realizedFromWithdrawals: amount(re.realizedFromWithdrawals),
-          realizedFromWithdrawalsRaw: re.realizedFromWithdrawals,
-          realizedFromCollectedFees: amount(re.realizedFromCollectedFees),
-          realizedFromCollectedFeesRaw: re.realizedFromCollectedFees,
-          realizedFromFxEffect: amount(re.realizedFromFxEffect),
-          realizedFromFxEffectRaw: re.realizedFromFxEffect,
-          total: amount(re.total),
-          totalRaw: re.total,
-        },
-        totalEquity: amount(equity.totalEquity),
-        totalEquityRaw: equity.totalEquity,
-      },
-    },
-    realizedPnl: {
-      netPnl: amount(pnl.netPnl),
-      netPnlRaw: pnl.netPnl,
-      realizedFromWithdrawals: amount(pnl.realizedFromWithdrawals),
-      realizedFromWithdrawalsRaw: pnl.realizedFromWithdrawals,
-      realizedFromCollectedFees: amount(pnl.realizedFromCollectedFees),
-      realizedFromCollectedFeesRaw: pnl.realizedFromCollectedFees,
-      realizedFromFxEffect: amount(pnl.realizedFromFxEffect),
-      realizedFromFxEffectRaw: pnl.realizedFromFxEffect,
-    },
-    journalEntries: report.journalEntries.map((entry) => ({
-      date: timestamp(entry.entryDate),
-      description: entry.description,
-      memo: entry.memo,
-      lines: entry.lines.map((line) => ({
-        side: line.side,
-        account: `${line.accountCode} — ${line.accountName} (${line.accountCategory})`,
-        amountReporting: line.amountReporting === null ? null : amount(line.amountReporting),
-        amountReportingRaw: line.amountReporting,
-      })),
-    })),
   };
 }
 

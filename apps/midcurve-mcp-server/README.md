@@ -15,7 +15,6 @@ Sixteen tools, all read-only.
 | `get_user` | Identity check — returns the wallet address the API key is bound to. |
 | `list_positions` | Paginated list of all positions with PnL/APR fields. |
 | `get_position` | Detail of a single position (UniswapV3 NFT or vault). |
-| `get_pnl` | Realized P&L statement for a period (day/week/month/quarter/year). |
 | `list_close_orders` | Stop-loss / take-profit orders attached to a position. |
 | `get_pool` | UniswapV3 pool state + subgraph metrics. |
 | `list_notifications` | Range alerts and order-execution notifications. |
@@ -25,7 +24,6 @@ Sixteen tools, all read-only.
 | Tool | Purpose |
 |------|---------|
 | `get_position_conversion` | Net deposits/withdrawals/holdings, net rebalancing direction + average execution price, fee premium, and per-segment rebalancing history. |
-| `get_position_accounting` | Lifetime balance sheet, realized P&L breakdown, and full journal-entry audit trail (in the user's reporting currency). |
 | `get_position_apr` | Per-period APR breakdown plus a time-weighted summary of realized, unrealized, and total APR. |
 
 **Per-position simulation**

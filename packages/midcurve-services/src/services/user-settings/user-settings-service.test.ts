@@ -29,7 +29,6 @@ describe('UserSettingsService — favoritePoolHashes lazy compat', () => {
     return {
       settings: {
         favoritePoolHashes,
-        costBasisMethod: 'fifo',
       },
     };
   }
@@ -39,7 +38,7 @@ describe('UserSettingsService — favoritePoolHashes lazy compat', () => {
       findUnique.mockResolvedValue(null);
       const settings = await service.getByUserId('u1');
       expect(settings.favoritePoolHashes).toEqual([]);
-      expect(settings.costBasisMethod).toBe('fifo');
+      expect(settings.poolTableVisibleColumns).toEqual(['tvl', 'feeApr7d', 'lvrCoverage']);
     });
 
     it('normalizes legacy string entries to FavoritePoolEntry shape', async () => {
@@ -102,7 +101,7 @@ describe('UserSettingsService — favoritePoolHashes lazy compat', () => {
     });
 
     it('returns [] when favoritePoolHashes is missing or not an array', async () => {
-      findUnique.mockResolvedValue({ settings: { costBasisMethod: 'fifo' } });
+      findUnique.mockResolvedValue({ settings: {} });
       let entries = await service.getFavoritePoolEntries('u1');
       expect(entries).toEqual([]);
 
@@ -290,7 +289,6 @@ describe('UserSettingsService — poolTableVisibleColumns', () => {
     return {
       settings: {
         favoritePoolHashes: [],
-        costBasisMethod: 'fifo',
         poolTableVisibleColumns: value,
       },
     };
@@ -307,7 +305,7 @@ describe('UserSettingsService — poolTableVisibleColumns', () => {
 
     it('returns defaults when the field is missing (legacy row)', async () => {
       findUnique.mockResolvedValue({
-        settings: { favoritePoolHashes: [], costBasisMethod: 'fifo' },
+        settings: { favoritePoolHashes: [] },
       });
       const cols = await service.getPoolTableVisibleColumns('u1');
       expect(cols).toEqual(DEFAULT_COLUMNS);

@@ -18,10 +18,7 @@ import {
   EnrichCoingeckoTokensRule,
   RefreshCoingeckoTokensRule,
   UniswapV3ProcessCloseOrderEventsRule,
-  UniswapV3PostJournalEntriesRule,
-  UniswapV3ReconcileCostBasisRule,
   UniswapV3ReevaluateOnWalletChangeRule,
-  UniswapV3VaultPostJournalEntriesRule,
   RefuelOperatorRule,
   type BusinessRuleStatus,
 } from '../rules';
@@ -69,13 +66,8 @@ export class RuleManager {
     // UniswapV3 close order lifecycle event handler - syncs close orders with on-chain state
     this.registry.register(new UniswapV3ProcessCloseOrderEventsRule());
 
-    // UniswapV3 accounting rules — NFT positions
-    this.registry.register(new UniswapV3PostJournalEntriesRule());
-    this.registry.register(new UniswapV3ReconcileCostBasisRule());
+    // UniswapV3 NFT positions — recalculate ledger aggregates on wallet changes
     this.registry.register(new UniswapV3ReevaluateOnWalletChangeRule());
-
-    // UniswapV3 accounting rules — Vault positions
-    this.registry.register(new UniswapV3VaultPostJournalEntriesRule());
 
     // Automation rules
     // Operator gas refueling from treasury WETH
