@@ -11,5 +11,4 @@ export {
   formatFeeTier,
   formatUSDValue,
   formatProtocolName,
-  formatReportingAmount,
 } from '@midcurve/shared';

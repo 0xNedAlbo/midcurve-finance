@@ -48,11 +48,6 @@ export const queryKeys = {
       apr: (chainId: number, nftId: string) =>
         [...queryKeys.positions.uniswapv3.aprs(), chainId, nftId] as const,
 
-      // Accounting report
-      accountings: () => [...queryKeys.positions.uniswapv3.all, 'accounting'] as const,
-      accounting: (chainId: number, nftId: string) =>
-        [...queryKeys.positions.uniswapv3.accountings(), chainId, nftId] as const,
-
       // Conversion summary
       conversions: () => [...queryKeys.positions.uniswapv3.all, 'conversion'] as const,
       conversion: (chainId: number, nftId: string) =>
@@ -89,11 +84,6 @@ export const queryKeys = {
       aprs: () => [...queryKeys.positions.uniswapv3Vault.all, 'apr'] as const,
       apr: (chainId: number, vaultAddress: string, ownerAddress: string) =>
         [...queryKeys.positions.uniswapv3Vault.aprs(), chainId, vaultAddress, ownerAddress] as const,
-
-      // Accounting report
-      accountings: () => [...queryKeys.positions.uniswapv3Vault.all, 'accounting'] as const,
-      accounting: (chainId: number, vaultAddress: string, ownerAddress: string) =>
-        [...queryKeys.positions.uniswapv3Vault.accountings(), chainId, vaultAddress, ownerAddress] as const,
 
       // Conversion summary
       conversions: () => [...queryKeys.positions.uniswapv3Vault.all, 'conversion'] as const,
@@ -187,15 +177,6 @@ export const queryKeys = {
       all: ['tokens', 'spl'] as const,
       // ... similar structure
     },
-  },
-
-  // ============================================
-  // ACCOUNTING
-  // ============================================
-  accounting: {
-    all: ['accounting'] as const,
-    balanceSheet: (period: string, offset: number = 0) => [...queryKeys.accounting.all, 'balance-sheet', period, offset] as const,
-    pnl: (period: string, offset: number = 0) => [...queryKeys.accounting.all, 'pnl', period, offset] as const,
   },
 
   // ============================================

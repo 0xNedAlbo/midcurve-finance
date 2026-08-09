@@ -46,8 +46,8 @@ export function useRefreshAllPositions() {
         // 429 rate-limited
         setRetryAfter(response.data.retryAfter);
       } else {
-        // Invalidate accounting queries to refetch fresh data
-        queryClient.invalidateQueries({ queryKey: queryKeys.accounting.all });
+        // Invalidate position queries to refetch fresh data
+        queryClient.invalidateQueries({ queryKey: queryKeys.positions.all });
       }
     },
   });
