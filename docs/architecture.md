@@ -785,16 +785,22 @@ database and diffs the result against `schema.prisma`, exiting non-zero if they
 differ. It answers the only question that matters about the migration folder:
 **does applying it to an empty database produce the schema the client expects?**
 
-Run it:
+**It runs on every PR** (`.github/workflows/pr-tests.yml`, against a Postgres
+service container), so the chain is verified without anyone remembering to. Run
+it locally when you want the answer before pushing — after creating a migration,
+especially a hand-written one, or after rebasing onto a `main` that gained
+migrations.
 
-- after creating a migration, especially a hand-written one
-- before applying the chain to any empty database (a fresh deploy, a new dev
-  machine, CI)
-- after rebasing a branch onto a `main` that gained migrations
+Hand-written migrations are standing practice here, which is why this is a CI
+check rather than a documented command: the drift it catches is the expected
+failure of the workflow, not a rare one, and a manual check is at its least
+likely to be run on the largest migration.
 
 It needs `psql` and a `DATABASE_URL` whose role may `CREATE DATABASE`. The
-throwaway database is created and dropped by the script; `DATABASE_URL` itself
-is only read.
+throwaway database is created and dropped by the script — including on the drift
+path and on an interrupted run — and `DATABASE_URL` itself is only read. A run
+killed outright leaves the database behind; the next run drops it before
+starting, so it self-heals rather than accumulating.
 
 #### Two things `prisma migrate` will not tell you
 

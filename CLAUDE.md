@@ -41,8 +41,8 @@ pnpm db:migrate:verify  # Does the chain reproduce schema.prisma from empty?
 pnpm db:studio          # Inspect database
 ```
 
-Run `db:migrate:verify` after creating a migration and before applying the chain
-to any empty database. `prisma migrate status` does not report database-only
+`db:migrate:verify` runs on every PR; run it locally after writing a migration
+to get the answer sooner. `prisma migrate status` does not report database-only
 migration rows, so a clean status is not evidence of a clean history — see
 [docs/architecture.md](docs/architecture.md), "Verifying the migration chain".
 
