@@ -87,11 +87,21 @@ export function UniswapV3VaultCollectFeesForm({
     !isNotOwner &&
     unclaimedFees > 0n;
 
+  // A wrong network is the only reason that can reach a disabled button. The
+  // prompt renders only once connected and owned by the user, and the modal
+  // cannot be opened at all without unclaimed fees — uniswapv3-vault-actions
+  // disables its entry point on `!hasUnclaimedFees`.
+  const collectDisabledReason =
+    isWrongNetwork && chainConfig
+      ? `Switch your wallet to ${chainConfig.name} to collect fees.`
+      : undefined;
+
   const collectFeesTx = useEvmTransactionPrompt({
     label: 'Collect Fees',
     buttonLabel: 'Collect',
     chainId: config.chainId,
     enabled: canCollect,
+    disabledReason: collectDisabledReason,
     txHash: collectFees.collectTxHash,
     isSubmitting: collectFees.isCollecting,
     isWaitingForConfirmation: collectFees.isWaitingForConfirmation,
