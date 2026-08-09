@@ -29,6 +29,7 @@ import {
 } from './uniswapv3-vault-position-state.js';
 import { calculatePositionValue } from '../../../utils/uniswapv3/liquidity.js';
 import { priceToSqrtRatioX96 } from '../../../utils/uniswapv3/price.js';
+import { normalizeAddress } from '../../../utils/evm/address.js';
 
 // ============================================================================
 // CONSTRUCTOR PARAMS
@@ -61,6 +62,31 @@ export class UniswapV3VaultPosition extends BasePosition {
     super(params);
     this._config = params.config;
     this._state = params.state;
+  }
+
+  // ============================================================================
+  // Hash builder
+  // ============================================================================
+
+  /**
+   * Canonical positionHash for vault positions.
+   *
+   * A vault holds shares for many owners, so vaultAddress alone does not
+   * disambiguate — the share holder is part of the identity.
+   *
+   * Both addresses are normalized to EIP-55 here rather than at the call
+   * sites, so a hash built from lowercase input matches one built from
+   * checksummed input. This is the single source of truth for the format;
+   * do not inline the template literal elsewhere.
+   *
+   * @throws if either address is not a valid EVM address
+   */
+  static createHash(
+    chainId: number,
+    vaultAddress: string,
+    ownerAddress: string
+  ): string {
+    return `uniswapv3-vault/${chainId}/${normalizeAddress(vaultAddress)}/${normalizeAddress(ownerAddress)}`;
   }
 
   // ============================================================================
