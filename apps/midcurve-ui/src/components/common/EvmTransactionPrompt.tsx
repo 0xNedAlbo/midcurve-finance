@@ -46,6 +46,14 @@ export interface EvmTransactionPromptProps {
   enabled?: boolean;
 
   /**
+   * Why the action is unavailable, shown while the button is disabled.
+   * Supply this whenever `enabled` can be false for a reason the surrounding
+   * UI does not already explain — a disabled control with no account of
+   * itself is as opaque as one that silently ignores clicks.
+   */
+  disabledReason?: string;
+
+  /**
    * Whether to show the action button (Start/Retry)
    * Use this to control sequential transaction flow
    */
@@ -165,6 +173,7 @@ export function useEvmTransactionPrompt({
   retryButtonLabel = 'Retry',
   chainId,
   enabled = true,
+  disabledReason,
   showActionButton = true,
   txHash,
   isSubmitting = false,
@@ -275,6 +284,11 @@ export function useEvmTransactionPrompt({
   // Show buttons when idle OR when there's an error (for retry), but not when active
   const showButtons = showActionButton && (isIdle || isError) && !isActive;
 
+  // Retry stays clickable regardless of `enabled` — it only resets local state
+  // and is the way out of an error, not a way to execute.
+  const isButtonDisabled = !enabled && !isError;
+  const showDisabledReason = showButtons && isButtonDisabled && !!disabledReason;
+
   const element = (
     <div
       className={`py-3 px-4 rounded-lg transition-colors ${
@@ -327,13 +341,19 @@ export function useEvmTransactionPrompt({
           {showButtons && (
             <button
               onClick={isError ? handleRetry : handleExecute}
-              className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 transition-colors cursor-pointer"
+              disabled={isButtonDisabled}
+              className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600 transition-colors cursor-pointer"
             >
               {isError ? retryButtonLabel : buttonLabel}
             </button>
           )}
         </div>
       </div>
+
+      {/* Why the button is disabled */}
+      {showDisabledReason && (
+        <div className="mt-2 pl-8 text-sm text-slate-400">{disabledReason}</div>
+      )}
 
       {/* Error message */}
       {isError && parsedError && (
