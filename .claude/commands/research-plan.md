@@ -10,7 +10,7 @@ You are about to work on a RESEARCH issue. Before doing the research, post a pla
 ## Task
 
 1. Determine the current repository (e.g. via `git remote -v`).
-2. Read issue #$1 using the GitHub tools.
+2. Read issue #$1.
 3. Understand scope, out-of-scope, and the desired output format from the issue body.
 4. Post a plan comment with the following structure:
 

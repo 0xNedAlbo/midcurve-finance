@@ -1,4 +1,4 @@
-Read GitHub issue #$ARGUMENTS using the github MCP.
+Read GitHub issue #$ARGUMENTS.
 
 Plan the implementation thoroughly. Cover:
 - What needs to change (files to add/modify, key types/functions, tests).

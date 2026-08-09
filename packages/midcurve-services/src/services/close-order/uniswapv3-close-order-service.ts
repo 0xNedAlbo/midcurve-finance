@@ -363,7 +363,6 @@ export class UniswapV3CloseOrderService {
             {
               protocol,
               positionId,
-              sharedContractId: sharedContract.id,
               orderIdentityHash,
               closeOrderHash,
               automationState: isOurOrder ? 'monitoring' : 'inactive',
@@ -474,7 +473,6 @@ export class UniswapV3CloseOrderService {
         data: {
           protocol: input.protocol,
           positionId: input.positionId,
-          sharedContractId: input.sharedContractId,
           orderIdentityHash: input.orderIdentityHash,
           closeOrderHash: input.closeOrderHash,
           automationState: input.automationState ?? 'monitoring',
@@ -519,7 +517,6 @@ export class UniswapV3CloseOrderService {
 
       const mutableFields = {
         positionId: input.positionId,
-        sharedContractId: input.sharedContractId,
         closeOrderHash: input.closeOrderHash,
         automationState: input.automationState ?? 'monitoring',
         config: input.config as Prisma.InputJsonValue,

@@ -12,7 +12,11 @@
  */
 
 import { decodeEventLog } from 'viem';
-import { UniswapV3PositionCloserV100Abi, UniswapV3VaultPositionCloserV100Abi } from '@midcurve/shared';
+import {
+  UniswapV3PositionCloserV100Abi,
+  UniswapV3VaultPositionCloserV100Abi,
+  normalizeAddress,
+} from '@midcurve/shared';
 
 // ============================================================
 // Enum Helpers
@@ -337,10 +341,24 @@ export function buildCloseOrderEvent(
   const args = decoded.args;
   const triggerMode = triggerModeToString(args.triggerMode as number);
 
-  // Build envelope with protocol-specific identifiers
+  // Build envelope with protocol-specific identifiers.
+  //
+  // contractAddress is normalized here rather than at the call sites: all three
+  // producers funnel through this function, and every one of them lowercases
+  // (the WS provider and the catch-up scanner directly, the receipt publisher
+  // by passing a stored value straight back through). The rule writes this
+  // value into CloseOrder.config.contractAddress, which the executor then uses
+  // as the target for live contract calls — so the field has to hold one form,
+  // not "checksummed if reconciliation wrote the row, lowercase if the event
+  // rule did". See .claude/rules/evm-addresses.md.
+  //
+  // vaultAddress below is deliberately left as-is: it feeds
+  // buildCloseOrderRoutingKey(), so changing its case would change routing keys
+  // and break existing queue bindings. The rule normalizes it on the way into
+  // config instead.
   const envelope = {
     chainId,
-    contractAddress,
+    contractAddress: normalizeAddress(contractAddress),
     ...(isVault
       ? { vaultAddress: String(args.vault), ownerAddress: String(args.owner) }
       : { nftId: String(args.nftId) }),

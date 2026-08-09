@@ -133,6 +133,40 @@ describe('vault close order events', () => {
     );
   });
 
+  it('normalizes contractAddress, whatever case the producer passed', () => {
+    // Every producer lowercases before calling in — the WS provider and the
+    // catch-up scanner directly, the receipt publisher by handing back a stored
+    // value. The rule writes this straight into CloseOrder.config, so a
+    // lowercase envelope means a lowercase config on rows the event rule
+    // created and a checksummed one on rows reconciliation created.
+    const event = buildCloseOrderEvent(CHAIN_ID, CLOSER.toLowerCase(), vaultRegisteredLog());
+    expect(event!.contractAddress).toBe(CLOSER);
+  });
+
+  it('converges on one contractAddress no matter which form reached the decoder', () => {
+    // The point of the normalization. Reconciliation writes the registry value
+    // (already EIP-55); the event rule writes this envelope. They have to agree,
+    // because the executor calls the contract at whatever config holds — so the
+    // lowercase and checksummed inputs must land on the same string.
+    const fromLowercase = buildCloseOrderEvent(
+      CHAIN_ID,
+      CLOSER.toLowerCase(),
+      vaultRegisteredLog(),
+    );
+    const fromRegistry = buildCloseOrderEvent(CHAIN_ID, CLOSER, vaultRegisteredLog());
+
+    expect(fromLowercase!.contractAddress).toBe(fromRegistry!.contractAddress);
+  });
+
+  it('leaves the routing key untouched when the contract address is normalized', () => {
+    // vaultAddress feeds the routing key; normalizing it here would change queue
+    // bindings. Only contractAddress moves.
+    const event = buildCloseOrderEvent(CHAIN_ID, CLOSER.toLowerCase(), vaultRegisteredLog());
+    expect(closeOrderRoutingKeyForEvent(event!)).toBe(
+      `closer.vault.${CHAIN_ID}.${VAULT}.LOWER`,
+    );
+  });
+
   it('refuses to route an event with no identifiers rather than dropping it silently', () => {
     expect(() =>
       closeOrderRoutingKeyForEvent({
