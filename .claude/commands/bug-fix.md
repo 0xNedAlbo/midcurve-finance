@@ -32,8 +32,11 @@ This workflow is asynchronous, including when Claude Code runs in Plan Mode. Whe
 
 6. **Commit**: Create a commit with a descriptive message:
 
-fix: short description
-Fixes #<number>
+   ```
+   fix: short description
+
+   Fixes #<number>
+   ```
 
 7. **Open a PR**: Push the branch and create a pull request:
    - Title: `fix: short description`
