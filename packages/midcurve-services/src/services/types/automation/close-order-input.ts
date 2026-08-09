@@ -23,7 +23,6 @@ import type { AutomationState } from '@midcurve/shared';
 export interface CreateCloseOrderInput {
   protocol: string;
   positionId: string;
-  sharedContractId?: string;
   orderIdentityHash: string;
   closeOrderHash?: string;
   automationState?: AutomationState;

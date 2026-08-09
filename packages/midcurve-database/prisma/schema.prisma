@@ -435,9 +435,6 @@ model SharedContract {
   // Status (allows soft-disable without deletion)
   isActive Boolean @default(true)
 
-  // Relations
-  closeOrders CloseOrder[]
-
   // Indexes for efficient lookups
   // Note: sharedContractHash provides uniqueness (includes type, name, version, and is derived from config)
   @@index([sharedContractType])
@@ -468,9 +465,14 @@ model CloseOrder {
   positionId String
   position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
 
-  // Contract reference
-  sharedContractId String?
-  sharedContract   SharedContract? @relation(fields: [sharedContractId], references: [id], onDelete: SetNull)
+  // Contract reference: config.contractAddress, deliberately not an FK.
+  //
+  // There was a nullable sharedContractId here. It was set when reconciliation
+  // created the row and null when the on-chain event rule did, so the same
+  // column meant two different things depending on which writer won the race,
+  // and nothing ever read it. config.contractAddress is written identically by
+  // both writers and is what the executor actually calls the contract at, so
+  // the address is the reference and the FK was decoration. See #81.
 
   // === AUTOMATION LIFECYCLE ===
   // Single field tracking our system's engagement with the order.
@@ -527,7 +529,6 @@ model CloseOrder {
   @@index([automationState])
   @@index([positionId])
   @@index([closeOrderHash])
-  @@index([sharedContractId])
   @@map("close_orders")
   @@schema("public")
 }
