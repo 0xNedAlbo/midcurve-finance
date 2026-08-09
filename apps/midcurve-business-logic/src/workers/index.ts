@@ -22,7 +22,6 @@ import {
   UniswapV3ReconcileCostBasisRule,
   UniswapV3ReevaluateOnWalletChangeRule,
   UniswapV3VaultPostJournalEntriesRule,
-  UniswapV3StakingPostJournalEntriesRule,
   RefuelOperatorRule,
   type BusinessRuleStatus,
 } from '../rules';
@@ -77,9 +76,6 @@ export class RuleManager {
 
     // UniswapV3 accounting rules — Vault positions
     this.registry.register(new UniswapV3VaultPostJournalEntriesRule());
-
-    // UniswapV3 accounting rules — Staking-vault positions (SPEC-0003b)
-    this.registry.register(new UniswapV3StakingPostJournalEntriesRule());
 
     // Automation rules
     // Operator gas refueling from treasury WETH
