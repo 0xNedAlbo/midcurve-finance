@@ -21,6 +21,23 @@ jobs:
       contents: read
       pull-requests: read
 
+    # Throwaway Postgres for the migration-chain verification below. Holds no
+    # data and is never seeded — the check creates and drops its own database.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,6 +55,15 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Does applying the checked-in migrations to an empty database produce the
+      # schema the client expects? Hand-written migrations are standing practice
+      # here, so this is the expected failure of the workflow rather than a rare
+      # one. Runs before the build for fast feedback; it needs only the schema.
+      - name: Verify migration chain
+        run: pnpm --filter @midcurve/database db:migrate:verify
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
       - name: Build
         run: pnpm build
