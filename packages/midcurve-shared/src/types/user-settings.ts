@@ -6,16 +6,6 @@
  */
 
 /**
- * Cost basis tracking method for token lot disposals.
- *
- * - 'fifo': First In, First Out — oldest lots consumed first
- * - 'lifo': Last In, First Out — newest lots consumed first
- * - 'hifo': Highest In, First Out — highest cost basis lots consumed first
- * - 'wac': Weighted Average Cost — blended cost basis across all open lots
- */
-export type CostBasisMethod = 'fifo' | 'lifo' | 'hifo' | 'wac';
-
-/**
  * A single favorite-pool entry persisted in `UserSettingsData.favoritePoolHashes`.
  *
  * Pre-issue-#45 entries were plain strings (`hash`-only). The lazy
@@ -100,12 +90,6 @@ export interface UserSettingsData {
   favoritePoolHashes: FavoritePoolEntry[];
 
   /**
-   * Cost basis method for realized PnL calculations.
-   * Determines how token lots are selected for disposal.
-   */
-  costBasisMethod: CostBasisMethod;
-
-  /**
    * Pool search table columns the user has chosen to make visible.
    *
    * Column display order is hardcoded in the table component; this list
@@ -124,6 +108,5 @@ export interface UserSettingsData {
  */
 export const DEFAULT_USER_SETTINGS: UserSettingsData = {
   favoritePoolHashes: [],
-  costBasisMethod: 'fifo',
   poolTableVisibleColumns: ['tvl', 'feeApr7d', 'lvrCoverage'],
 };

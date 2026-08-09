@@ -5,27 +5,8 @@
 
 // User types
 export type { User } from './user.js';
-export type { UserSettingsData, CostBasisMethod, FavoritePoolEntry, PoolTableColumnId } from './user-settings.js';
+export type { UserSettingsData, FavoritePoolEntry, PoolTableColumnId } from './user-settings.js';
 export { DEFAULT_USER_SETTINGS, POOL_TABLE_COLUMN_IDS } from './user-settings.js';
-
-// ============================================================================
-// Accounting types (double-entry journal system)
-// ============================================================================
-
-export type {
-  AccountCategory,
-  JournalSide,
-  AccountCode,
-  JournalEntryInput,
-  JournalLineInput,
-  SnapshotType,
-  ValuationMethod,
-  PositionBreakdownItem,
-  TokenLotTransferEvent,
-  AcquisitionTransferEvent,
-  DisposalTransferEvent,
-} from './accounting/index.js';
-export { ACCOUNT_CODES, LEDGER_REF_PREFIX, CHART_OF_ACCOUNTS } from './accounting/index.js';
 
 // Authentication types
 export type { ApiKeyDisplay } from './api-key.js';
@@ -394,16 +375,6 @@ export type {
   UniswapV3PoolPriceSubscriptionData,
   UniswapV3PoolPriceSubscriptionJSON,
 } from './onchain-subscription/index.js';
-
-// ============================================================================
-// Wallet Perimeter types (transfer classification)
-// ============================================================================
-
-export type {
-  TransferClassificationType,
-  ProtocolCounterparty,
-  TransferClassification,
-} from './wallet-perimeter/index.js';
 
 export {
   // ERC-20 Approval
