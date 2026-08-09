@@ -485,6 +485,11 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
    * Returns null when we simply don't track this position. Throws when the match
    * is ambiguous: a CloseOrder row points at exactly one position, so more than
    * one candidate is a state we cannot represent and must not guess at.
+   *
+   * Neither lookup scopes by user — an on-chain event carries none. This rests on
+   * the precondition that at most one user tracks any given on-chain position; see
+   * "On-Chain Event → Position Resolution Assumes One Tracker" in
+   * .claude/rules/platform-agnostic-design.md before changing either branch.
    */
   private async findPositionForEvent(
     event: AnyCloseOrderEvent,
@@ -520,7 +525,10 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
         throw new UnroutableCloseOrderEventError(
           `Ambiguous vault position for close order event: ${positions.length} matches ` +
             `for chainId=${event.chainId} vault=${vaultAddress} owner=${ownerAddress} ` +
-            `(ids: ${positions.map((p) => p.id).join(', ')})`
+            `(ids: ${positions.map((p) => p.id).join(', ')}). ` +
+            `More than one user tracks this position, which close orders cannot represent — ` +
+            `see "On-Chain Event → Position Resolution Assumes One Tracker" in ` +
+            `.claude/rules/platform-agnostic-design.md`
         );
       }
 
@@ -548,6 +556,10 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
       select: { id: true, config: true },
     });
 
+    // First match wins, silently — the deliberate deviation from the vault branch's
+    // throw above. Only reachable when more than one user tracks this nftId, which
+    // the precondition in the JSDoc forbids. Documented, not unified: see
+    // .claude/rules/platform-agnostic-design.md.
     const match = positions.find((p) => {
       const config = p.config as { chainId: number };
       return config.chainId === event.chainId;
