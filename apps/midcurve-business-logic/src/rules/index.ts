@@ -50,10 +50,6 @@ export { RefreshCoingeckoTokensRule } from './refresh-coingecko-tokens';
 // Close order rules (protocol-specific)
 export * from './close-orders';
 
-// Accounting rules (double-entry journal system, protocol-specific)
-export { UniswapV3PostJournalEntriesRule, UniswapV3ReconcileCostBasisRule } from './accounting/uniswapv3';
-export { UniswapV3VaultPostJournalEntriesRule } from './accounting/uniswapv3-vault';
-
 // Position rules (protocol-specific)
 export { UniswapV3ReevaluateOnWalletChangeRule } from './positions/uniswapv3';
 
