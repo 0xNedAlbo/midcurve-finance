@@ -37,8 +37,14 @@ cd apps/midcurve-contracts && forge build  # Solidity contracts
 ```bash
 cd packages/midcurve-database
 pnpm db:migrate:dev --name migration_name
-pnpm db:studio  # Inspect database
+pnpm db:migrate:verify  # Does the chain reproduce schema.prisma from empty?
+pnpm db:studio          # Inspect database
 ```
+
+Run `db:migrate:verify` after creating a migration and before applying the chain
+to any empty database. `prisma migrate status` does not report database-only
+migration rows, so a clean status is not evidence of a clean history — see
+[docs/architecture.md](docs/architecture.md), "Verifying the migration chain".
 
 ## Architecture Docs
 For detailed architecture, auth flows, and design decisions:

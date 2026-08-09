@@ -768,12 +768,56 @@ cd packages/midcurve-database
 # Edit prisma/schema.prisma
 pnpm db:migrate:dev --name your_migration_name
 
+# Verify the chain still reproduces the schema from empty
+pnpm db:migrate:verify
+
 # Changes immediately available via workspace linking
 # All apps automatically use the updated client
 
 # Run Prisma Studio to inspect database
 pnpm db:studio
 ```
+
+#### Verifying the migration chain
+
+`pnpm db:migrate:verify` applies every checked-in migration to a throwaway
+database and diffs the result against `schema.prisma`, exiting non-zero if they
+differ. It answers the only question that matters about the migration folder:
+**does applying it to an empty database produce the schema the client expects?**
+
+Run it:
+
+- after creating a migration, especially a hand-written one
+- before applying the chain to any empty database (a fresh deploy, a new dev
+  machine, CI)
+- after rebasing a branch onto a `main` that gained migrations
+
+It needs `psql` and a `DATABASE_URL` whose role may `CREATE DATABASE`. The
+throwaway database is created and dropped by the script; `DATABASE_URL` itself
+is only read.
+
+#### Two things `prisma migrate` will not tell you
+
+**`migrate status` does not report database-only migrations.** If
+`_prisma_migrations` holds a row with no corresponding folder, `migrate status`
+prints `Database schema is up to date!` and says nothing — *unless* a local
+migration also happens to be unapplied, at which point it reports both. A clean
+`migrate status` is therefore not evidence of a clean history. This reproduces
+on a freshly created, provably correct database, so it is a property of the
+tool, not a symptom of a damaged one. `db:migrate:verify` is the check that
+does not have this blind spot. (Found in #105.)
+
+**A database-only migration row cannot be removed with `migrate resolve`.**
+`--rolled-back` fails with `P3012` ("not in a failed state") because the row
+records a success, and `--applied` is for the opposite case — a folder with no
+row. Deleting the row directly is the supported route, not a workaround:
+
+```sql
+DELETE FROM _prisma_migrations WHERE migration_name = '<name>';
+```
+
+Verify with `db:migrate:verify` before doing this, so you know the chain still
+reproduces the schema without whatever the row claimed to have applied.
 
 **Docker Deployment:**
 ```bash
@@ -788,6 +832,10 @@ npx prisma migrate deploy --schema=./packages/midcurve-database/prisma/schema.pr
 - **Development:** `pnpm db:migrate:dev` in midcurve-database package
 - **Production/Docker:** `prisma migrate deploy` in Dockerfile or entrypoint
 - **Safety:** `prisma migrate deploy` is idempotent (safe to run on every deployment)
+- **After merging a migration:** run `pnpm db:migrate:deploy` against your dev
+  database. A merged migration is not applied anywhere by merging it, and dev
+  drifts silently until someone runs `migrate dev` and inherits the divergence.
+  This is a step in `.claude/commands/finish-issue.md`.
 
 ### 3. Workspace Protocol for Package Linking
 
