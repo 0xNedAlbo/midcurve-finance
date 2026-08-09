@@ -409,6 +409,7 @@ model PositionAprPeriod {
 // Stores deployed shared contracts (e.g., UniswapV3PositionCloser) per chain/version
 // Uses JSON config field for platform-specific data (EVM: chainId + address)
 model SharedContract {
+  driftProbe String?
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
