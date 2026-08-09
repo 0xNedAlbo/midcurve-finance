@@ -19,7 +19,10 @@ All core types are platform-agnostic with platform-specific data in typed config
 
 - Database primary key: CUID (`id` field)
 - Human-readable identity: `{type}Hash` field using slash-separated format
-    - Positions: "uniswapv3/{chainId}/{nftId}"
+    - Positions (NFT): "uniswapv3/{chainId}/{nftId}"
+    - Positions (vault): "uniswapv3-vault/{chainId}/{vaultAddress}/{ownerAddress}", both
+      addresses EIP-55 checksummed — a vault is an ERC-20, so the holder is part of the
+      identity. Build it with `UniswapV3VaultPosition.createHash()`, never by hand.
     - Tokens: "erc20/{chainId}/{address}"
     - Pools: "uniswapv3/{chainId}/{poolAddress}"
 
