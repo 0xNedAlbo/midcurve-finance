@@ -18,10 +18,6 @@ import {
   UniswapV3VaultPositionLedgerEvent,
   type UniswapV3VaultPositionLedgerEventRow,
 } from './uniswapv3-vault/uniswapv3-vault-position-ledger-event.js';
-import {
-  UniswapV3StakingPositionLedgerEvent,
-  type UniswapV3StakingPositionLedgerEventRow,
-} from './uniswapv3-staking/uniswapv3-staking-position-ledger-event.js';
 
 /**
  * PositionLedgerEventFactory
@@ -61,11 +57,6 @@ export class PositionLedgerEventFactory {
           row as UniswapV3VaultPositionLedgerEventRow
         );
 
-      case 'uniswapv3-staking':
-        return UniswapV3StakingPositionLedgerEvent.fromDB(
-          row as UniswapV3StakingPositionLedgerEventRow
-        );
-
       default:
         throw new Error(`Unknown ledger event protocol: ${row.protocol}`);
     }
@@ -78,6 +69,6 @@ export class PositionLedgerEventFactory {
    * @returns true if protocol is supported
    */
   static isSupported(protocol: string): protocol is LedgerEventProtocol {
-    return ['uniswapv3', 'uniswapv3-vault', 'uniswapv3-staking'].includes(protocol);
+    return ['uniswapv3', 'uniswapv3-vault'].includes(protocol);
   }
 }

@@ -61,22 +61,6 @@ export {
   vaultPositionStateFromJSON,
 } from './uniswapv3-vault/index.js';
 
-// UniswapV3 Staking specific
-export {
-  UniswapV3StakingPosition,
-  UniswapV3StakingPositionConfig,
-  type UniswapV3StakingPositionParams,
-  type UniswapV3StakingPositionRow,
-  type UniswapV3StakingPositionConfigData,
-  type UniswapV3StakingPositionConfigJSON,
-  type UniswapV3StakingPositionState,
-  type UniswapV3StakingPositionStateJSON,
-  type UniswapV3StakingPositionMetrics,
-  type StakingState,
-  stakingPositionStateToJSON,
-  stakingPositionStateFromJSON,
-} from './uniswapv3-staking/index.js';
-
 // Simulation overlay
 export {
   CloseOrderSimulationOverlay,
@@ -90,7 +74,6 @@ export {
 // Import for use in type alias
 import type { UniswapV3Position as UniswapV3PositionType } from './uniswapv3/index.js';
 import type { UniswapV3VaultPosition as UniswapV3VaultPositionType } from './uniswapv3-vault/index.js';
-import type { UniswapV3StakingPosition as UniswapV3StakingPositionType } from './uniswapv3-staking/index.js';
 
 /**
  * Union type for all position implementations.
@@ -98,5 +81,4 @@ import type { UniswapV3StakingPosition as UniswapV3StakingPositionType } from '.
  */
 export type AnyPosition =
   | UniswapV3PositionType
-  | UniswapV3VaultPositionType
-  | UniswapV3StakingPositionType;
+  | UniswapV3VaultPositionType;

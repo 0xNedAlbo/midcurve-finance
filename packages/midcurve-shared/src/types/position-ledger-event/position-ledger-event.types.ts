@@ -11,7 +11,7 @@
 /**
  * Supported protocols for ledger events
  */
-export type LedgerEventProtocol = 'uniswapv3' | 'uniswapv3-vault' | 'uniswapv3-staking';
+export type LedgerEventProtocol = 'uniswapv3' | 'uniswapv3-vault';
 
 // ============================================================================
 // EVENT TYPES
@@ -42,12 +42,7 @@ export type EventType =
   | 'VAULT_COLLECT_YIELD'
   | 'VAULT_TRANSFER_IN'
   | 'VAULT_TRANSFER_OUT'
-  | 'VAULT_CLOSE_ORDER_EXECUTED'
-  // Staking-vault events (SPEC-0003b)
-  | 'STAKING_DEPOSIT'
-  | 'STAKING_DISPOSE'
-  | 'STAKING_YIELD_TARGET_SET'
-  | 'STAKING_PENDING_BPS_SET';
+  | 'VAULT_CLOSE_ORDER_EXECUTED';
 
 // ============================================================================
 // REWARD STRUCTURE

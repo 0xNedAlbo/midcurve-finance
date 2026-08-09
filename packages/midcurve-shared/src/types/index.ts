@@ -126,11 +126,6 @@ export {
   UniswapV3VaultPositionConfig,
   vaultPositionStateToJSON,
   vaultPositionStateFromJSON,
-  // Staking position
-  UniswapV3StakingPosition,
-  UniswapV3StakingPositionConfig,
-  stakingPositionStateToJSON,
-  stakingPositionStateFromJSON,
 } from './position/index.js';
 export type {
   PnLScenario,
@@ -145,15 +140,6 @@ export type {
   UniswapV3VaultPositionConfigJSON,
   UniswapV3VaultPositionState,
   UniswapV3VaultPositionStateJSON,
-  // Staking position types
-  UniswapV3StakingPositionParams,
-  UniswapV3StakingPositionRow,
-  UniswapV3StakingPositionConfigData,
-  UniswapV3StakingPositionConfigJSON,
-  UniswapV3StakingPositionState,
-  UniswapV3StakingPositionStateJSON,
-  UniswapV3StakingPositionMetrics,
-  StakingState,
 } from './position/index.js';
 
 // ============================================================================
@@ -261,12 +247,6 @@ export {
   vaultLedgerEventConfigFromJSON,
   vaultLedgerEventStateToJSON,
   vaultLedgerEventStateFromJSON,
-  // Staking ledger events
-  UniswapV3StakingPositionLedgerEvent,
-  stakingLedgerEventConfigToJSON,
-  stakingLedgerEventConfigFromJSON,
-  stakingLedgerEventStateToJSON,
-  stakingLedgerEventStateFromJSON,
 } from './position-ledger-event/index.js';
 export type {
   UniswapV3VaultLedgerEventConfig,
@@ -280,18 +260,6 @@ export type {
   UniswapV3VaultTransferOutEvent,
   UniswapV3VaultPositionLedgerEventParams,
   UniswapV3VaultPositionLedgerEventRow,
-  // Staking ledger event types
-  UniswapV3StakingLedgerEventConfig,
-  UniswapV3StakingLedgerEventConfigJSON,
-  UniswapV3StakingLedgerEventState,
-  UniswapV3StakingLedgerEventStateJSON,
-  UniswapV3StakingDepositEvent,
-  UniswapV3StakingDisposeEvent,
-  UniswapV3StakingYieldTargetSetEvent,
-  UniswapV3StakingPendingBpsSetEvent,
-  UniswapV3StakingPositionLedgerEventParams,
-  UniswapV3StakingPositionLedgerEventRow,
-  StakingDisposeSource,
 } from './position-ledger-event/index.js';
 
 // ============================================================================
