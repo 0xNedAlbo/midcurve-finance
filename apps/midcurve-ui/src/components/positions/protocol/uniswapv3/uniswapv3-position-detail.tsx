@@ -20,14 +20,23 @@ interface UniswapV3PositionDetailProps {
   position: UniswapV3PositionData;
 }
 
-export type TabType = "overview" | "apr-analysis" | "pnl-analysis" | "conversion" | "automation" | "accounting" | "technical";
+const TAB_IDS = ["overview", "apr-analysis", "pnl-analysis", "conversion", "automation", "accounting", "technical"] as const;
+
+export type TabType = (typeof TAB_IDS)[number];
+
+// The tab content is a flat list of `activeTab === ...` guards with no default
+// branch, so an unrecognised value renders an empty page. Anything not in
+// TAB_IDS is therefore normalised to the first tab.
+function toTabType(value: string | null): TabType {
+  return TAB_IDS.includes(value as TabType) ? (value as TabType) : "overview";
+}
 
 export function UniswapV3PositionDetail({ position: rawPosition }: UniswapV3PositionDetailProps) {
   const [searchParams] = useSearchParams();
 
   // Get tab from URL query params, default to 'overview'
   // Read directly from URL params (no state) so it updates when URL changes
-  const activeTab = (searchParams.get("tab") || "overview") as TabType;
+  const activeTab = toTabType(searchParams.get("tab"));
 
   // Extract chain ID and NFT ID for header
   const config = rawPosition.config as { chainId: number; nftId: number; tickLower: number; tickUpper: number };

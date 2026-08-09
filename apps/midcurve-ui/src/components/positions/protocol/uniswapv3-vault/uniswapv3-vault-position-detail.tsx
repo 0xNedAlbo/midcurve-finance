@@ -23,8 +23,6 @@ interface UniswapV3VaultPositionDetailProps {
   position: UniswapV3VaultPositionData;
 }
 
-export type VaultTabType = "overview" | "pnl-analysis" | "apr-analysis" | "conversion" | "automation" | "accounting" | "technical";
-
 const vaultTabs = [
   { id: "overview", icon: BarChart3, label: "Overview" },
   { id: "pnl-analysis", icon: Clock, label: "PnL Analysis" },
@@ -35,12 +33,21 @@ const vaultTabs = [
   { id: "technical", icon: Settings, label: "Technical Details" },
 ] as const;
 
+export type VaultTabType = (typeof vaultTabs)[number]["id"];
+
+// The tab content is a flat list of `activeTab === ...` guards with no default
+// branch, so an unrecognised value renders an empty page. Anything not in
+// vaultTabs is therefore normalised to the first tab.
+function toVaultTabType(value: string | null): VaultTabType {
+  return vaultTabs.some((tab) => tab.id === value) ? (value as VaultTabType) : "overview";
+}
+
 export function UniswapV3VaultPositionDetail({ position: rawPosition }: UniswapV3VaultPositionDetailProps) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
   // Get tab from URL query params, default to 'overview'
-  const activeTab = (searchParams.get("tab") || "overview") as VaultTabType;
+  const activeTab = toVaultTabType(searchParams.get("tab"));
 
   // Extract chain ID and vault address for header
   const config = rawPosition.config as UniswapV3VaultPositionConfigResponse;
