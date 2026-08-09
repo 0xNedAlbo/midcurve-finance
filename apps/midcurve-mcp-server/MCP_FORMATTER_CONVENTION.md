@@ -45,7 +45,7 @@ single canonical value, unchanged.
 
 **Raw** is the canonical lossless form in which upstream delivers the value —
 typically a bigint scaled by 10^decimals, but may also be a fixed-point bigint
-(Q64.96), a 10^8-scaled accounting bigint, or a float string when upstream is
+(Q64.96), or a float string when upstream is
 itself float-based (e.g. subgraph USD metrics). The defining property is that
 the consumer can reconstruct the exact value without precision loss.
 
@@ -155,7 +155,7 @@ downstream caller, the formatter is incomplete.
 
 The dual-emit rule applies to **any scaled numeric** in any formatter — the
 canonical examples below cover the position-shaped tools, but the same pattern
-extends to PnL, accounting, conversion, and pool-metrics outputs (see §3.2.b).
+extends to PnL, conversion, and pool-metrics outputs (see §3.2.b).
 
 #### 3.2.a Position-shaped money fields (quote-token-denominated)
 
@@ -180,12 +180,6 @@ the pair, never `"0.00 USDC"` for one and `null` for the other.
 The same pattern applies in non-position-shaped tools. Reference list (not
 exhaustive — any new scaled numeric joins this convention):
 
-- **Reporting-currency amounts** (`get_pnl`, `get_position_accounting`):
-  `<field>` formatted via `formatReportingAmount` (e.g. `"$1,234.56"`),
-  `<field>Raw` is the upstream bigint string scaled to **10^8**
-  (the accounting domain's reporting-currency precision).
-  Pairs: `netPnl`/`netPnlRaw`, `realizedFromWithdrawals`/`...Raw`, etc. at
-  every nesting level (portfolio, instruments[], positions[], journal lines).
 - **Conversion-summary amounts** (`get_position_conversion`): base- and
   quote-denominated, named explicitly per §7. Pairs: `base`/`baseRaw` (scaled
   to base-token decimals), `quote`/`quoteRaw` and `avgPrice`/`avgPriceRaw`
@@ -261,8 +255,7 @@ via:
     formatCompactValue(rawValue, quoteToken.decimals) + " " + quoteToken.symbol
 
 For non-position-shaped tools, the analogue per §3.2.b applies:
-`formatReportingAmount` for accounting amounts (10^8 scale, currency
-prefix), `formatUSDValue` for pool USD metrics (compact `$123.5M`
+`formatUSDValue` for pool USD metrics (compact `$123.5M`
 notation). In every case, the helper is the single source of truth for
 the numeric portion — its branch logic (magnitude-dependent decimal
 handling, zero-skip subscript notation for tiny values, truncation
@@ -381,35 +374,6 @@ Add `current` / `currentRaw` / `inRange` to `priceRange`; otherwise the same
 advanced/debug consumers. Those blocks are protocol-specific and do **not**
 follow dual-emit — every field there is canonical (ticks, sqrtPriceX96,
 liquidity, accumulators).
-
-### 6.3 `get_pnl` portfolio block (non-position-shaped reference)
-
-Reporting-currency amounts use the same dual-emit shape as position-shaped
-money fields, only with a different formatter (`formatReportingAmount`) and a
-different scale (10^8 rather than per-token decimals):
-
-```jsonc
-{
-  "period": "month",
-  "startDate": "Apr 1, 2026, 12:00:00 AM (24 days ago)",
-  "endDate":   "Apr 30, 2026, 11:59:59 PM (in 5 days)",
-  "reportingCurrency": "USD",
-  "portfolio": {
-    "netPnl":                       "$3,124.56",
-    "netPnlRaw":                    "312456000000",
-    "realizedFromWithdrawals":      "$2,800.00",
-    "realizedFromWithdrawalsRaw":   "280000000000",
-    "realizedFromCollectedFees":    "$324.56",
-    "realizedFromCollectedFeesRaw": "32456000000",
-    "realizedFromFxEffect":         "$0.00",
-    "realizedFromFxEffectRaw":      "0"
-  },
-  "instruments": [ /* same dual-emit pairs */ ]
-}
-```
-
-The Raw companion is the upstream bigint string scaled to 10^8 — feed it back
-into any consumer that needs exact arithmetic on accounting amounts.
 
 ## 7. Anti-patterns
 
