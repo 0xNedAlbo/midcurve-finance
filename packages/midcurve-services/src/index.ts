@@ -47,8 +47,6 @@ export * from './services/automation/index.js';
 export * from './services/notifications/index.js';
 export * from './services/transaction/index.js';
 export * from './services/swap-router/index.js';
-export * from './services/journal/index.js';
-export * from './services/token-lot/index.js';
 export * from './services/system-config/index.js';
 export * from './services/user-settings/index.js';
 export * from './services/wallet-perimeter/index.js';
