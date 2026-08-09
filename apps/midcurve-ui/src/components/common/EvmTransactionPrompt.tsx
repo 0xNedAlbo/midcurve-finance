@@ -182,12 +182,21 @@ export function useEvmTransactionPrompt({
   // Use the provided txHash or internal one
   const effectiveTxHash = txHash || internalTxHash;
 
-  // Watch transaction status via backend subscription
+  // Watch transaction status via backend subscription.
+  //
+  // Deliberately NOT gated on `enabled`. Whether the user may *start* a
+  // transaction depends on the current network and account; whether we follow
+  // one already submitted does not. A transaction confirms on chain no matter
+  // what the wallet is connected to in the meantime, so tying the subscription
+  // to `enabled` would stop tracking mid-flight the moment the user switched
+  // networks — freezing the prompt on a spinner forever. A tx hash only exists
+  // after a submission that `handleExecute` already gated, so the hash itself
+  // is the correct precondition.
   const txWatch = useWatchTransactionStatus({
     txHash: effectiveTxHash ?? null,
     chainId: chainId ?? 1,
     targetConfirmations,
-    enabled: enabled && !!effectiveTxHash && !!chainId,
+    enabled: !!effectiveTxHash && !!chainId,
   });
 
   // Filter user rejection errors
