@@ -103,7 +103,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         // quoteTokenAddress omitted → service uses chain defaults → token0 fallback
       });
 
-      // 3. Publish position.created domain event for downstream processing (journal backfill, etc.)
+      // 3. Publish position.created domain event for downstream processing
       const eventPublisher = getDomainEventPublisher();
       await eventPublisher.createAndPublish<PositionLifecyclePayload>({
         type: 'position.created',

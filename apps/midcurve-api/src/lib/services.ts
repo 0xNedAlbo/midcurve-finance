@@ -32,7 +32,6 @@ import {
   UniswapV3LedgerService,
   UniswapV3AprService,
   SwapRouterService,
-  JournalService,
   UniswapV3VaultPositionService,
   UniswapV3VaultLedgerService,
   UserWalletService,
@@ -341,13 +340,6 @@ export function getSwapRouterService(): SwapRouterService {
  */
 export function getSubgraphClient(): UniswapV3SubgraphClient {
   return UniswapV3SubgraphClient.getInstance();
-}
-
-/**
- * Get singleton instance of JournalService
- */
-export function getJournalService(): JournalService {
-  return JournalService.getInstance();
 }
 
 /**
