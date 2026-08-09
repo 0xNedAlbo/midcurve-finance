@@ -19,7 +19,10 @@ cd "$(dirname "$0")/.."
 # The package .env is a symlink to the repo root .env. Neither npm nor pnpm loads
 # it, and Prisma loads it too late to help — CLI flags are expanded by the shell
 # before Prisma runs. So it has to be sourced here.
-if [ -f .env ]; then
+#
+# Only when DATABASE_URL is not already set, so an explicit value wins over the
+# file. CI sets it directly and has no .env.
+if [ -z "${DATABASE_URL:-}" ] && [ -f .env ]; then
   set -a
   . ./.env
   set +a
@@ -35,11 +38,23 @@ if [ "$SHADOW_URL" = "$DATABASE_URL" ]; then
   exit 1
 fi
 
+# Cleanup runs on every exit path, including drift and an aborted run. It says so
+# out loud when it cannot drop the database rather than leaving a stray one to be
+# discovered later — the whole point of a throwaway is that nobody has to wonder
+# which database is real.
 drop_shadow() {
-  psql "$DATABASE_URL" -q -c "DROP DATABASE IF EXISTS \"$SHADOW_NAME\";" >/dev/null 2>&1
+  if ! psql "$DATABASE_URL" -q -c "DROP DATABASE IF EXISTS \"$SHADOW_NAME\";" >/dev/null 2>&1; then
+    echo "Warning: could not drop the throwaway database $SHADOW_NAME. Drop it by hand." >&2
+  fi
 }
 trap drop_shadow EXIT
+# A signal does not always run the EXIT trap, so handle the two that arrive in
+# practice — Ctrl-C and a CI cancellation — and exit with the conventional code.
+trap 'drop_shadow; exit 130' INT
+trap 'drop_shadow; exit 143' TERM
 
+# Also covers a database left behind by a run that was killed outright (SIGKILL,
+# a closed laptop), which no trap can catch.
 drop_shadow
 psql "$DATABASE_URL" -q -c "CREATE DATABASE \"$SHADOW_NAME\";" >/dev/null
 
