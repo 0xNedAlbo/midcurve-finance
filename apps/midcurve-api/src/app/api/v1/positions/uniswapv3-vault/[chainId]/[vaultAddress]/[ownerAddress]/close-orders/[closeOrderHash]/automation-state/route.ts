@@ -9,7 +9,6 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 import { withAuth } from '@/middleware/with-auth';
 import {
   createSuccessResponse,
@@ -18,7 +17,9 @@ import {
   ErrorCodeToHttpStatus,
   CloseOrderHashSchema,
   SetAutomationStateBodySchema,
+  GetUniswapV3VaultPositionParamsSchema,
 } from '@midcurve/api-shared';
+import { UniswapV3VaultPosition } from '@midcurve/shared';
 import { serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
 import {
@@ -30,10 +31,11 @@ import { createPreflightResponse } from '@/lib/cors';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const PathParamsSchema = z.object({
-  chainId: z.string().regex(/^\d+$/).transform(Number),
-  vaultAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  ownerAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+/**
+ * The shared vault position path (which normalizes both addresses to EIP-55)
+ * plus the close order identifier.
+ */
+const PathParamsSchema = GetUniswapV3VaultPositionParamsSchema.extend({
   closeOrderHash: CloseOrderHashSchema,
 });
 
@@ -74,7 +76,7 @@ export async function PATCH(
       const { chainId, vaultAddress, ownerAddress, closeOrderHash } = paramsValidation.data;
       const { automationState } = bodyValidation.data;
 
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
+      const positionHash = UniswapV3VaultPosition.createHash(chainId, vaultAddress, ownerAddress);
       const position = await getUniswapV3VaultPositionService().findByPositionHash(
         user.id,
         positionHash

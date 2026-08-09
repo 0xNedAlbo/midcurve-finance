@@ -24,6 +24,7 @@ import {
   pricePerToken1InToken0,
   type Erc20Token,
   type UniswapV3Pool,
+  UniswapV3VaultPosition,
 } from '@midcurve/shared';
 import { apiLogger, apiLog } from '@/lib/logger';
 import { getUniswapV3VaultPositionService } from '@/lib/services';
@@ -80,7 +81,7 @@ export async function GET(
       }
 
       const { chainId, vaultAddress, ownerAddress } = pathValidation.data;
-      const positionHash = `uniswapv3-vault/${chainId}/${vaultAddress}/${ownerAddress}`;
+      const positionHash = UniswapV3VaultPosition.createHash(chainId, vaultAddress, ownerAddress);
 
       const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(
         user.id,
