@@ -613,7 +613,7 @@ midcurve-business-logic/
 
 **Location:** `apps/midcurve-contracts/`
 
-**Purpose:** Solidity smart contracts for Uniswap V3 position management, vault staking, fee collection, and treasury operations. Implements the Diamond Proxy Pattern (EIP-2535) for upgradeable closer/collector contracts and a DEX aggregator (MidcurveSwapRouter) for post-close token swaps.
+**Purpose:** Solidity smart contracts for Uniswap V3 position management, vaults, fee collection, and treasury operations. Implements the Diamond Proxy Pattern (EIP-2535) for upgradeable closer/collector contracts and a DEX aggregator (MidcurveSwapRouter) for post-close token swaps.
 
 **Technology:**
 - **Solidity 0.8.28** - Smart contract language
@@ -641,11 +641,6 @@ Diamond variant tailored for vault-held positions; uses the same facet model (`R
 - `AllowlistedUniswapV3Vault.sol` - Allowlist-gated variant
 - `UniswapV3VaultFactory.sol` - Factory for deploying vaults
 
-**Staking Vault (`contracts/staking-vault/`):**
-- `UniswapV3StakingVault.sol` - Staking vault with top-up, partial unstake, and fractional `flashClose` semantics (see SPEC-0003a)
-- `UniswapV3StakingVaultFactory.sol` - Factory
-- `IFlashCloseCallback` - Flash-close callback interface (`expectedBase`/`expectedQuote` are floor-rounded)
-
 **Fee Collector (`contracts/fee-collector/`, Diamond Pattern):**
 Diamond contract for collecting and distributing protocol fees. Facets: `CollectRegistrationFacet`, `CollectExecutionFacet`, `CollectViewFacet`, `CollectOwnerUpdateFacet`, `MulticallFacet`, `VersionFacet`.
 
@@ -668,7 +663,6 @@ midcurve-contracts/
 │   ├── position-closer/         # Diamond proxy for closing UniswapV3 NFT positions
 │   ├── vault-position-closer/   # Diamond variant for vault-held positions
 │   ├── vault/                   # UniswapV3Vault + factory + allowlisted variant
-│   ├── staking-vault/           # UniswapV3StakingVault + factory (flashClose)
 │   ├── fee-collector/           # Diamond for protocol-fee collection
 │   ├── treasury/                # MidcurveTreasury
 │   ├── swap-router/             # MidcurveSwapRouter + UniswapV3/Paraswap adapters
