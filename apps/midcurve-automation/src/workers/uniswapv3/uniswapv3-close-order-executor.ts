@@ -15,7 +15,7 @@
 
 import { formatCurrency, UniswapV3Position } from '@midcurve/shared';
 import { ParaswapSwapService, isParaswapSupportedChain, publishCloseOrderEventsFromReceipt } from '@midcurve/services';
-import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getVaultPositionService, getUserNotificationService } from '../../lib/services';
+import { getUniswapV3CloseOrderService, getAutomationSubscriptionService, getAutomationLogService, getPositionService, getVaultPositionService } from '../../lib/services';
 import {
   broadcastTransaction,
   waitForTransaction,
@@ -324,31 +324,6 @@ export class CloseOrderExecutor {
             { orderId, positionId, retryCount, error: error.message },
             'Order permanently failed after max attempts'
           );
-
-          // Send failure notification
-          try {
-            const position = order.protocol === 'uniswapv3-vault'
-              ? await getVaultPositionService().findById(positionId)
-              : await getPositionService().findById(positionId);
-            if (position) {
-              const userNotificationService = getUserNotificationService();
-              const notifyMethod = triggerSide === 'lower'
-                ? userNotificationService.notifyStopLossFailed
-                : userNotificationService.notifyTakeProfitFailed;
-
-              await notifyMethod.call(userNotificationService, {
-                userId: position.userId,
-                positionId,
-                orderId,
-                chainId,
-                triggerSqrtPriceX96: triggerPrice,
-                error: error.message,
-                retryCount,
-              });
-            }
-          } catch (notifyErr) {
-            autoLog.methodError(log, 'handleMessage.notifyFailure', notifyErr, { orderId, positionId });
-          }
         }
       } catch (trackingErr) {
         const trackingError = trackingErr as Error;
@@ -1270,28 +1245,6 @@ export class CloseOrderExecutor {
       await getVaultPositionService().refresh(positionId);
     } else {
       await getPositionService().refresh(positionId);
-    }
-
-    // Send execution success notification
-    try {
-      const userNotificationService = getUserNotificationService();
-      const notifyMethod = triggerSide === 'lower'
-        ? userNotificationService.notifyStopLossExecuted
-        : userNotificationService.notifyTakeProfitExecuted;
-
-      await notifyMethod.call(userNotificationService, {
-        userId,
-        positionId,
-        orderId,
-        chainId,
-        txHash,
-        amount0Out: '0', // TODO: Parse from tx receipt
-        amount1Out: '0', // TODO: Parse from tx receipt
-        triggerSqrtPriceX96: triggerPrice,
-        executionSqrtPriceX96: _currentPrice,
-      });
-    } catch (notifyErr) {
-      autoLog.methodError(log, 'executeOrder.notify', notifyErr, { orderId, positionId });
     }
   }
 }

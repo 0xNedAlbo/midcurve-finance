@@ -12,10 +12,6 @@ import {
   AutomationLogService,
   UniswapV3PositionService,
   UniswapV3VaultPositionService,
-  WebhookConfigService,
-  UserNotificationService,
-  UiNotificationAdapter,
-  WebhookNotificationAdapter,
   SharedContractService,
 } from '@midcurve/services';
 
@@ -26,8 +22,6 @@ let _uniswapV3PoolService: UniswapV3PoolService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _positionService: UniswapV3PositionService | null = null;
 let _vaultPositionService: UniswapV3VaultPositionService | null = null;
-let _webhookConfigService: WebhookConfigService | null = null;
-let _userNotificationService: UserNotificationService | null = null;
 let _sharedContractService: SharedContractService | null = null;
 
 /**
@@ -91,16 +85,6 @@ export function getVaultPositionService(): UniswapV3VaultPositionService {
 }
 
 /**
- * Get singleton instance of WebhookConfigService
- */
-export function getWebhookConfigService(): WebhookConfigService {
-  if (!_webhookConfigService) {
-    _webhookConfigService = new WebhookConfigService();
-  }
-  return _webhookConfigService;
-}
-
-/**
  * Get singleton instance of SharedContractService
  */
 export function getSharedContractService(): SharedContractService {
@@ -108,25 +92,4 @@ export function getSharedContractService(): SharedContractService {
     _sharedContractService = new SharedContractService();
   }
   return _sharedContractService;
-}
-
-/**
- * Get singleton instance of UserNotificationService (with adapters wired)
- */
-export function getUserNotificationService(): UserNotificationService {
-  if (!_userNotificationService) {
-    _userNotificationService = new UserNotificationService({
-      adapters: [
-        new UiNotificationAdapter({
-          positionService: getPositionService(),
-        }),
-        new WebhookNotificationAdapter({
-          webhookConfigService: getWebhookConfigService(),
-          positionService: getPositionService(),
-          closeOrderService: getUniswapV3CloseOrderService(),
-        }),
-      ],
-    });
-  }
-  return _userNotificationService;
 }
