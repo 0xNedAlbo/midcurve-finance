@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import type { Erc20TokenJSON } from '@midcurve/shared';
 import type { ApiResponse } from '../common/index.js';
 
 /**
@@ -37,36 +38,31 @@ export const CreateErc20TokenRequestSchema = z.object({
 });
 
 /**
- * Token data structure (for create/discover response - full Token object)
+ * Wire shape of an Erc20Token as returned by the API.
+ *
+ * Re-exported from `@midcurve/shared`, where it lives beside the `Erc20Token`
+ * class: a class's serialized shape is a fact about the class, not about the
+ * transport that carries it. Keeping one declaration is what lets
+ * `Erc20Token.fromWire()` accept this type without a cast.
+ *
+ * Mirrors the output of `serializeErc20Token` in midcurve-api: `Date` fields are
+ * ISO 8601 strings and there are no methods.
  */
-export interface CreateErc20TokenData {
-  id: string;
-  tokenType: 'erc20';
-  name: string;
-  symbol: string;
-  decimals: number;
-  logoUrl?: string;
-  coingeckoId?: string;
-  marketCap?: number;
-  config: {
-    address: string;
-    chainId: number;
-  };
-  createdAt: string; // ISO 8601
-  updatedAt: string; // ISO 8601
-}
+export type Erc20TokenWire = Erc20TokenJSON;
+
+/**
+ * Token data structure (for create/discover response - full Token object)
+ *
+ * Alias of Erc20TokenWire — they share the wire shape today; split into a
+ * standalone type if they ever diverge (e.g. create-input gains a field that
+ * doesn't ship on the wire).
+ */
+export type CreateErc20TokenData = Erc20TokenWire;
 
 /**
  * POST /api/v1/tokens/erc20 - Response
  */
 export type CreateErc20TokenResponse = ApiResponse<CreateErc20TokenData>;
-
-// Alias of CreateErc20TokenData — they share the wire shape today; split into
-// a standalone type if they ever diverge (e.g. create-input gains a field that
-// doesn't ship on the wire). Used for composing wire-shape types like
-// UniswapV3PoolWire where naming the create endpoint at the call site would be
-// misleading.
-export type Erc20TokenWire = CreateErc20TokenData;
 
 /**
  * Token search candidate from CoinGecko (lightweight, not in database yet)

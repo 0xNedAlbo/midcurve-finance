@@ -17,6 +17,7 @@ const WETH: Erc20TokenWire = {
   name: 'Wrapped Ether',
   symbol: 'WETH',
   decimals: 18,
+  tokenHash: 'erc20/8453/0x4200000000000000000000000000000000000006',
   config: {
     address: '0x4200000000000000000000000000000000000006',
     chainId: 8453,
@@ -31,6 +32,7 @@ const USDC: Erc20TokenWire = {
   name: 'USD Coin',
   symbol: 'USDC',
   decimals: 6,
+  tokenHash: 'erc20/8453/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
   config: {
     address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     chainId: 8453,

@@ -158,6 +158,7 @@ export function serializeErc20Token(token: Erc20Token): Erc20TokenWire {
     logoUrl: token.logoUrl,
     coingeckoId: token.coingeckoId,
     marketCap: token.marketCap,
+    tokenHash: token.tokenHash,
     config: {
       address: token.typedConfig.address,
       chainId: token.typedConfig.chainId,
