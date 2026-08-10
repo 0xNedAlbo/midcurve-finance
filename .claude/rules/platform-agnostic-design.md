@@ -2,8 +2,15 @@
 
 ## Multi-Platform Architecture
 
-This project supports multiple DeFi platforms (UniswapV3 today, Orca/Aerodrome/Solana/SUI future).
-All core types are platform-agnostic with platform-specific data in typed config/state fields.
+This project supports UniswapV3 on EVM chains. All core types are platform-agnostic with
+platform-specific data in typed config/state fields, so a future platform attaches without
+touching the existing one — that design guidance below still holds and is worth keeping.
+
+What is *not* anticipated: Bitcoin and Solana. Both were removed as wallet platforms on
+purpose in #114 — not parked, not deferred. `UserWallet.walletType` accepts `evm` only and
+remains as the seam a future non-EVM wallet type would attach to. Do not reintroduce either
+as a worked example, and do not read the platform-agnostic structure as a commitment to a
+specific next platform.
 
 ### Type Structure
 
@@ -66,7 +73,7 @@ Trailhead: issue #83.
 
 ### Adding a New Platform
 
-- Add new discriminator value (e.g. "orca")
+- Add new discriminator value (e.g. "aerodrome")
 - Define config/state types for the new platform
 - Create platform-specific directory and files
 - Never modify existing platform implementations to accommodate the new one
