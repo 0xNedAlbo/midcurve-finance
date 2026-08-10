@@ -5,8 +5,7 @@
  * Each consumer owns its own subscriptions and is responsible for its own lifecycle.
  *
  * SubscriptionId formats:
- * - Per-position (range monitor): auto:range-monitor:{positionId}
- * - Per-order (close order):      auto:close-order:{orderId}
+ * - Per-order (close order): auto:close-order:{orderId}
  *
  * Key difference from UI subscriptions:
  * - Automation subscriptions use expiresAfterMs: null (persistent, never auto-paused)
@@ -32,98 +31,6 @@ export class AutomationSubscriptionService {
   constructor(dependencies: AutomationSubscriptionServiceDependencies = {}) {
     this.prisma = dependencies.prisma ?? prismaClient;
     this.logger = createServiceLogger('AutomationSubscriptionService');
-  }
-
-  /**
-   * Ensure a persistent pool price subscription exists for a specific position.
-   * Used by RangeMonitor — 1 subscription per position for trivial lifecycle management.
-   *
-   * Idempotent — safe to call multiple times for the same position.
-   */
-  async ensurePositionSubscription(positionId: string, chainId: number, poolAddress: string): Promise<void> {
-    log.methodEntry(this.logger, 'ensurePositionSubscription', { positionId, chainId, poolAddress });
-
-    const normalizedAddress = poolAddress.toLowerCase();
-    const subscriptionId = this.buildPositionSubscriptionId(positionId);
-
-    try {
-      const config: UniswapV3PoolPriceSubscriptionConfig = {
-        chainId,
-        poolAddress: normalizedAddress,
-        startedAt: new Date().toISOString(),
-      };
-
-      await this.prisma.onchainDataSubscribers.upsert({
-        where: { subscriptionId },
-        create: {
-          subscriptionType: 'uniswapv3-pool-price',
-          subscriptionId,
-          status: 'active',
-          expiresAfterMs: null,
-          lastPolledAt: new Date(),
-          config: config as unknown as Prisma.InputJsonValue,
-          state: emptyUniswapV3PoolPriceState() as unknown as Prisma.InputJsonValue,
-        },
-        update: {
-          status: 'active',
-          expiresAfterMs: null,
-          pausedAt: null,
-        },
-      });
-
-      this.logger.info(
-        { positionId, chainId, poolAddress: normalizedAddress, subscriptionId },
-        'Position subscription ensured',
-      );
-      log.methodExit(this.logger, 'ensurePositionSubscription', { subscriptionId });
-    } catch (error) {
-      log.methodError(this.logger, 'ensurePositionSubscription', error as Error, {
-        positionId,
-        chainId,
-        poolAddress,
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Remove a position's pool price subscription.
-   * No pool lookup needed — subscriptionId is deterministic from positionId.
-   */
-  async removePositionSubscription(positionId: string): Promise<void> {
-    log.methodEntry(this.logger, 'removePositionSubscription', { positionId });
-
-    try {
-      const subscriptionId = this.buildPositionSubscriptionId(positionId);
-
-      const result = await this.prisma.onchainDataSubscribers.updateMany({
-        where: {
-          subscriptionId,
-          status: 'active',
-        },
-        data: {
-          status: 'deleted',
-          pausedAt: new Date(),
-        },
-      });
-
-      if (result.count > 0) {
-        this.logger.info(
-          { positionId, subscriptionId },
-          'Position subscription marked for deletion',
-        );
-      }
-
-      log.methodExit(this.logger, 'removePositionSubscription', {
-        positionId,
-        removed: result.count > 0,
-      });
-    } catch (error) {
-      log.methodError(this.logger, 'removePositionSubscription', error as Error, {
-        positionId,
-      });
-      throw error;
-    }
   }
 
   /**
@@ -216,14 +123,6 @@ export class AutomationSubscriptionService {
       });
       throw error;
     }
-  }
-
-  /**
-   * Build deterministic subscriptionId for per-position subscriptions (range monitor).
-   * Format: auto:range-monitor:<positionId>
-   */
-  private buildPositionSubscriptionId(positionId: string): string {
-    return `auto:range-monitor:${positionId}`;
   }
 
   /**
