@@ -33,7 +33,8 @@ import type {
 import { createServiceLogger } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
-import type { UniswapV3PoolPriceService } from '../pool-price/uniswapv3-pool-price-service.js';
+import { requirePoolPrice } from '../pool-price/pool-price-prefetch.js';
+import type { PoolPriceMap } from '../pool-price/pool-price-prefetch.js';
 import {
     calculateAprBps,
     calculateDurationSeconds,
@@ -95,6 +96,16 @@ export interface VaultRawLogInput {
     logIndex: string | number;
     removed?: boolean;
 }
+
+// ============================================================================
+// POOL PRICE PREFETCH
+// ============================================================================
+
+/**
+ * Prices for a vault import are resolved before the write transaction opens.
+ * See `pool-price-prefetch.ts` for why.
+ */
+export type VaultPoolPriceMap = PoolPriceMap;
 
 // ============================================================================
 // VALIDATION
@@ -616,7 +627,7 @@ export class UniswapV3VaultLedgerService {
         chainId: number,
         userAddress: string,
         logs: VaultRawLogInput[],
-        poolPriceService: UniswapV3PoolPriceService,
+        poolPrices: VaultPoolPriceMap,
         closerAddress?: string,
         tx?: PrismaTransactionClient,
     ): Promise<VaultImportLogsResult> {
@@ -676,7 +687,7 @@ export class UniswapV3VaultLedgerService {
                 chainId,
                 userAddress,
                 log,
-                poolPriceService,
+                poolPrices,
                 closerAddress,
                 closerLogsByTx,
                 mintBurnLogsByTx,
@@ -707,7 +718,7 @@ export class UniswapV3VaultLedgerService {
         chainId: number,
         userAddress: string,
         log: VaultRawLogInput,
-        poolPriceService: UniswapV3PoolPriceService,
+        poolPrices: VaultPoolPriceMap,
         closerAddress?: string,
         closerLogsByTx?: Map<string, VaultRawLogInput[]>,
         mintBurnLogsByTx?: Map<string, VaultRawLogInput[]>,
@@ -766,10 +777,10 @@ export class UniswapV3VaultLedgerService {
             }
         }
 
-        // 7. Discover pool price at event block
-        const poolPrice = await poolPriceService.discover(
-            { chainId, poolAddress: position.typedConfig.poolAddress },
-            { blockNumber: Number(blockNumber), blockHash: log.blockHash },
+        // 7. Read the pool price at the event block from the prefetched map.
+        // Resolved before the transaction opened — see prefetchPoolPrices.
+        const poolPrice = requirePoolPrice(
+            poolPrices, blockNumber, log.blockHash, `vault position ${this.positionId}`,
         );
         const sqrtPriceX96 = poolPrice.sqrtPriceX96;
         const blockTimestamp = poolPrice.timestamp;

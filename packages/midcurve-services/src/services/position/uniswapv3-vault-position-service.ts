@@ -44,11 +44,19 @@ import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
 import { UniswapV3QuoteTokenService } from '../quote-token/uniswapv3-quote-token-service.js';
 import { EvmBlockService } from '../block/evm-block-service.js';
 import { UniswapV3PoolPriceService } from '../pool-price/uniswapv3-pool-price-service.js';
-import { UniswapV3VaultLedgerService, type VaultRawLogInput } from '../position-ledger/uniswapv3-vault-ledger-service.js';
+import {
+    UniswapV3VaultLedgerService,
+    type VaultRawLogInput,
+    type VaultPoolPriceMap,
+} from '../position-ledger/uniswapv3-vault-ledger-service.js';
+import { prefetchPoolPrices } from '../pool-price/pool-price-prefetch.js';
 import { CacheService } from '../cache/index.js';
 import { SharedContractService } from '../automation/shared-contract-service.js';
 import { Erc20TokenService } from '../token/erc20-token-service.js';
-import { UniswapV3CloseOrderService } from '../close-order/uniswapv3-close-order-service.js';
+import {
+    UniswapV3CloseOrderService,
+    type CloseOrderChainSnapshot,
+} from '../close-order/uniswapv3-close-order-service.js';
 import { tickToPrice, createErc20TokenHash, createEvmOwnerWallet, calculatePositionValue } from '@midcurve/shared';
 import { calculateTokenValueInQuote } from '../../utils/uniswapv3/ledger-calculations.js';
 import { UniswapV3AprService } from '../position-apr/uniswapv3-apr-service.js';
@@ -130,6 +138,35 @@ function deserializeVaultState(cached: OnChainVaultStateCached): OnChainVaultSta
         positionManagerAddress: cached.positionManagerAddress,
         operatorAddress: cached.operatorAddress,
     };
+}
+
+// ============================================================================
+// REFRESH PLAN
+// ============================================================================
+
+/**
+ * Everything a refresh needs from the network, resolved before any transaction
+ * is opened.
+ *
+ * Produced by `planRefresh`, consumed by `applyRefresh`. The split keeps RPC
+ * round-trips — which can run to seconds on a full history scan — out of the
+ * write transaction.
+ */
+interface VaultRefreshPlan {
+    /** Position as of phase 1. Re-read inside the transaction before writing. */
+    position: UniswapV3VaultPosition;
+    /** Block the on-chain state was read at, or 'latest' */
+    blockNumber: number | 'latest';
+    /** Vault and closer logs from `fromBlock` to head */
+    logs: VaultRawLogInput[];
+    /** Pool price at every block covered by `logs` */
+    poolPrices: VaultPoolPriceMap;
+    /** Closer contract for this chain, when one is deployed */
+    closerAddress?: Address;
+    /** Vault state at `blockNumber` */
+    onChainState: OnChainVaultState;
+    /** Close-order slots, or null when skipped or unreadable */
+    closeOrders: CloseOrderChainSnapshot | null;
 }
 
 // ============================================================================
@@ -572,48 +609,78 @@ export class UniswapV3VaultPositionService {
     // REFRESH
     // ============================================================================
 
+    /**
+     * Sync a vault position with the chain: import new ledger events, update
+     * on-chain state and metrics, reconcile close orders.
+     *
+     * Runs in two phases, and the split is load-bearing:
+     *
+     *  1. {@link planRefresh} does every network read — event logs, the pool
+     *     price at each event block, vault state, close orders — with no
+     *     transaction open.
+     *  2. {@link applyRefresh} does every database write inside one short
+     *     transaction.
+     *
+     * Holding a transaction across phase 1 is what used to blow Prisma's
+     * interactive-transaction timeout and surface as "Transaction not found"
+     * from whichever query happened to run first after the RPC calls.
+     *
+     * @param id - Vault position ID
+     * @param blockNumber - Block to read on-chain state at, or 'latest'
+     * @param dbTx - Transaction to write in. When omitted, one is opened for
+     *   phase 2 only. Passing one puts the caller back in charge of the
+     *   timeout, so only do that if the caller's transaction is already short.
+     */
     async refresh(
         id: string,
         blockNumber: number | 'latest' = 'latest',
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3VaultPosition> {
-        await this.refreshAllPositionLogs(id, blockNumber, dbTx);
-        const result = await this.refreshOnChainState(id, blockNumber, dbTx);
-
-        // Reconcile close orders from on-chain (best-effort, non-fatal)
-        try {
-            await this._closeOrderService.refresh(id, blockNumber, dbTx);
-        } catch (closeOrderError) {
-            this.logger.warn(
-                { positionId: id, error: (closeOrderError as Error).message },
-                'Close order reconciliation failed (non-fatal)',
-            );
-        }
-
-        return result;
+        const plan = await this.planRefresh(id, blockNumber, { includeCloseOrders: true }, dbTx);
+        return this.applyRefresh(plan, dbTx);
     }
 
     // ============================================================================
     // RESET
     // ============================================================================
 
+    /**
+     * Drop the ledger and rebuild it from the vault's full on-chain history.
+     *
+     * Same two-phase shape as {@link refresh}: the plan is built with an
+     * explicit `fromBlock` of 0 rather than from the last stored event, because
+     * the events it would be derived from are deleted in phase 2. That keeps the
+     * log fetch outside the transaction that does the deleting.
+     */
     async reset(
         id: string,
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3VaultPosition> {
-        const position = await this.findById(id, dbTx);
-        if (!position) throw new Error(`Vault position not found: ${id}`);
+        const plan = await this.planRefresh(id, 'latest', {
+            fromBlock: 0n,
+            includeCloseOrders: false,
+        }, dbTx);
+        return this.applyRefresh(plan, dbTx, { clearLedgerFirst: true });
+    }
 
+    /**
+     * Delete every ledger event and emit a revert event per affected block.
+     * Phase-2 work — callers must already hold `tx`.
+     */
+    private async clearLedger(
+        position: UniswapV3VaultPosition,
+        tx: PrismaTransactionClient,
+    ): Promise<void> {
         const ledgerService = new UniswapV3VaultLedgerService(
-            { positionId: id },
+            { positionId: position.id },
             { prisma: this.prisma },
         );
 
         // Capture events for domain event emission
-        const existingEvents = await ledgerService.findAll(dbTx);
+        const existingEvents = await ledgerService.findAll(tx);
 
         // Delete all events
-        await ledgerService.deleteAll(dbTx);
+        await ledgerService.deleteAll(tx);
 
         // Emit revert events grouped by blockHash
         const publisher = getDomainEventPublisher();
@@ -636,12 +703,8 @@ export class UniswapV3VaultPositionService {
                     revertedAt: new Date().toISOString(),
                 },
                 source: 'business-logic',
-            }, dbTx);
+            }, tx);
         }
-
-        // Reimport from scratch
-        await this.refreshAllPositionLogs(id, 'latest', dbTx);
-        return this.refreshOnChainState(id, 'latest', dbTx);
     }
 
     // ============================================================================
@@ -679,39 +742,49 @@ export class UniswapV3VaultPositionService {
     }
 
     // ============================================================================
-    // PRIVATE: REFRESH LEDGER EVENTS
+    // PRIVATE: REFRESH PHASE 1 — NETWORK
     // ============================================================================
 
-    private async refreshAllPositionLogs(
+    /**
+     * Read everything the refresh needs from the chain. No transaction is open
+     * while this runs and nothing here writes position or ledger rows.
+     *
+     * The only database access is the handful of short reads needed to know
+     * *what* to fetch (the position itself, the last stored event, the closer
+     * contract address). Those are deliberately unscoped: a concurrent writer
+     * moving the last event only changes where the log scan starts, and the
+     * import deduplicates by input hash regardless.
+     */
+    private async planRefresh(
         id: string,
-        _blockNumber: number | 'latest' = 'latest',
+        blockNumber: number | 'latest',
+        options: { fromBlock?: bigint; includeCloseOrders: boolean },
         dbTx?: PrismaTransactionClient,
-    ): Promise<void> {
+    ): Promise<VaultRefreshPlan> {
+        // `dbTx` is only for the locating reads. It is set when the caller
+        // already holds a transaction — discover() creating a position and
+        // refreshing it in one — where these rows are not committed yet.
         const position = await this.findById(id, dbTx);
         if (!position) throw new Error(`Vault position not found: ${id}`);
 
         const chainId = position.chainId;
         const vaultAddress = position.vaultAddress;
+        const ownerAddress = position.typedConfig.ownerAddress;
         const client = this._evmConfig.getPublicClient(chainId);
 
-        const ledgerService = new UniswapV3VaultLedgerService(
-            { positionId: id },
-            { prisma: this.prisma },
-        );
-
-        // Determine fromBlock
-        const lastEvent = await ledgerService.findLast(dbTx);
-        let fromBlock: bigint;
-        if (lastEvent) {
-            const finalizedBlock = await this._evmBlockService.getLastFinalizedBlockNumber(chainId);
-            fromBlock = finalizedBlock && lastEvent.blockNumber < finalizedBlock
-                ? lastEvent.blockNumber
-                : lastEvent.blockNumber;
-        } else {
-            fromBlock = 0n; // Full sync — from block 0 (will be refined when we have vault deployment block)
+        // Where to start the log scan. reset() pins this to 0; an incremental
+        // refresh resumes from the last stored event.
+        let fromBlock = options.fromBlock;
+        if (fromBlock === undefined) {
+            const ledgerService = new UniswapV3VaultLedgerService(
+                { positionId: id },
+                { prisma: this.prisma },
+            );
+            const lastEvent = await ledgerService.findLast(dbTx);
+            // No events yet → full sync from block 0. Refine once we track the
+            // vault deployment block.
+            fromBlock = lastEvent ? lastEvent.blockNumber : 0n;
         }
-
-        const ownerAddress = position.typedConfig.ownerAddress;
 
         // Look up the closer contract address for this chain
         let closerAddress: Address | undefined;
@@ -726,8 +799,104 @@ export class UniswapV3VaultPositionService {
             client, vaultAddress as Address, ownerAddress as Address, fromBlock, 'latest', closerAddress,
         );
 
+        // Resolve the remaining chain reads together: the price at every event
+        // block, current vault state, and the close-order slots.
+        const [poolPrices, onChainState, closeOrders] = await Promise.all([
+            prefetchPoolPrices(
+                chainId, position.typedConfig.poolAddress, logs, this._poolPriceService,
+            ),
+            this.fetchVaultState(position, blockNumber),
+            options.includeCloseOrders
+                // Close-order reconciliation is best-effort and non-fatal; a
+                // missing closer contract must not fail the whole refresh.
+                ? this._closeOrderService.fetchChainSnapshot(id, blockNumber, dbTx).catch((error: unknown) => {
+                    this.logger.warn(
+                        { positionId: id, error: (error as Error).message },
+                        'Close order chain read failed (non-fatal) — skipping reconciliation',
+                    );
+                    return null;
+                })
+                : Promise.resolve(null),
+        ]);
+
+        return {
+            position,
+            blockNumber,
+            logs,
+            poolPrices,
+            closerAddress,
+            onChainState,
+            closeOrders,
+        };
+    }
+
+    // ============================================================================
+    // PRIVATE: REFRESH PHASE 2 — DATABASE
+    // ============================================================================
+
+    /**
+     * Write everything the plan resolved, in one transaction.
+     *
+     * Every value this needs is already in `plan`, so the transaction contains
+     * no network I/O and stays short enough for Prisma's default timeout.
+     */
+    private async applyRefresh(
+        plan: VaultRefreshPlan,
+        dbTx?: PrismaTransactionClient,
+        options: { clearLedgerFirst?: boolean } = {},
+    ): Promise<UniswapV3VaultPosition> {
+        const run = async (tx: PrismaTransactionClient): Promise<UniswapV3VaultPosition> => {
+            if (options.clearLedgerFirst) {
+                await this.clearLedger(plan.position, tx);
+            }
+
+            await this.importVaultLogs(plan, tx);
+            const result = await this.writeOnChainState(plan, tx);
+
+            if (plan.closeOrders) {
+                // Best-effort, non-fatal — mirrors the read side in planRefresh.
+                try {
+                    await this._closeOrderService.reconcileChainSnapshot(plan.closeOrders, tx);
+                } catch (closeOrderError) {
+                    this.logger.warn(
+                        { positionId: plan.position.id, error: (closeOrderError as Error).message },
+                        'Close order reconciliation failed (non-fatal)',
+                    );
+                }
+            }
+
+            return result;
+        };
+
+        if (dbTx) return run(dbTx);
+
+        return this.prisma.$transaction(run, {
+            // Pure database work. The bound is generous only because
+            // recalculateAggregates rewrites every ledger row of the position.
+            maxWait: 5_000,
+            timeout: 30_000,
+        });
+    }
+
+    /**
+     * Import the fetched logs and emit the resulting domain events.
+     * Phase-2 work — callers must already hold `tx`.
+     */
+    private async importVaultLogs(
+        plan: VaultRefreshPlan,
+        dbTx: PrismaTransactionClient,
+    ): Promise<void> {
+        const { position, logs, poolPrices, closerAddress } = plan;
+        const chainId = position.chainId;
+        const ownerAddress = position.typedConfig.ownerAddress;
+
+        const ledgerService = new UniswapV3VaultLedgerService(
+            { positionId: position.id },
+            { prisma: this.prisma },
+        );
+
         const importResult = await ledgerService.importLogsForPosition(
-            position, chainId, ownerAddress, logs, this._poolPriceService, closerAddress, dbTx,
+            position, chainId, ownerAddress, logs, poolPrices, closerAddress, dbTx,
         );
 
         // Emit domain events for deletions (reorgs)
@@ -817,18 +986,24 @@ export class UniswapV3VaultPositionService {
     }
 
     // ============================================================================
-    // PRIVATE: REFRESH ON-CHAIN STATE
+    // PRIVATE: WRITE ON-CHAIN STATE
     // ============================================================================
 
-    private async refreshOnChainState(
-        id: string,
-        blockNumber: number | 'latest' = 'latest',
-        dbTx?: PrismaTransactionClient,
+    /**
+     * Persist the fetched vault state plus the metrics derived from it and the
+     * freshly imported ledger. Phase-2 work — callers must already hold `dbTx`.
+     */
+    private async writeOnChainState(
+        plan: VaultRefreshPlan,
+        dbTx: PrismaTransactionClient,
     ): Promise<UniswapV3VaultPosition> {
+        const { blockNumber, onChainState } = plan;
+        const id = plan.position.id;
+
+        // Re-read inside the transaction: importVaultLogs may have moved the
+        // ledger, and plan.position predates the transaction.
         const position = await this.findById(id, dbTx);
         if (!position) throw new Error(`Vault position not found: ${id}`);
-
-        const onChainState = await this.fetchVaultState(position, blockNumber);
 
         const isClosed = onChainState.sharesBalance === 0n;
 
@@ -884,8 +1059,7 @@ export class UniswapV3VaultPositionService {
         const unrealizedPnl = currentValue - aggregates.costBasisAfter;
 
         // Backfill positionOpenedAt from first ledger event if it differs
-        const db = dbTx ?? this.prisma;
-        const firstEvent = await db.positionLedgerEvent.findFirst({
+        const firstEvent = await dbTx.positionLedgerEvent.findFirst({
             where: { positionId: id },
             orderBy: { timestamp: 'asc' },
             select: { timestamp: true },
@@ -909,7 +1083,7 @@ export class UniswapV3VaultPositionService {
         const persistedApr = aprSummary.belowThreshold ? null : aprSummary.totalApr;
 
         // Update position in DB
-        await db.position.update({
+        await dbTx.position.update({
             where: { id },
             data: {
                 state: vaultPositionStateToJSON(newState) as object,
