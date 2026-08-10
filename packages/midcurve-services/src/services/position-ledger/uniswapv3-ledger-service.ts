@@ -30,7 +30,8 @@ import { getPositionManagerAddress } from "../../config/uniswapv3.js";
 import { createServiceLogger } from "../../logging/index.js";
 import type { ServiceLogger } from "../../logging/index.js";
 import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
-import type { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
+import { requirePoolPrice } from "../pool-price/pool-price-prefetch.js";
+import type { PoolPriceMap } from "../pool-price/pool-price-prefetch.js";
 import {
     calculateAprBps,
     calculateDurationSeconds,
@@ -1560,7 +1561,7 @@ export class UniswapV3LedgerService {
         position: UniswapV3Position,
         chainId: number,
         logs: RawLogInput[],
-        poolPriceService: UniswapV3PoolPriceService,
+        poolPrices: PoolPriceMap,
         userWalletAddresses: Set<string>,
         tx?: PrismaTransactionClient,
     ): Promise<ImportLogsResult> {
@@ -1583,7 +1584,7 @@ export class UniswapV3LedgerService {
                 position,
                 chainId,
                 log,
-                poolPriceService,
+                poolPrices,
                 tx,
             );
             results.push(result);
@@ -1617,7 +1618,7 @@ export class UniswapV3LedgerService {
      * @param position - UniswapV3Position
      * @param chainId - EVM chain ID
      * @param log - Raw log data
-     * @param poolPriceService - Pool price service
+     * @param poolPrices - Prices prefetched before the write transaction opened
      * @param tx - Optional transaction client
      * @returns Single log result (no aggregates)
      */
@@ -1625,7 +1626,7 @@ export class UniswapV3LedgerService {
         position: UniswapV3Position,
         chainId: number,
         log: RawLogInput,
-        poolPriceService: UniswapV3PoolPriceService,
+        poolPrices: PoolPriceMap,
         tx?: PrismaTransactionClient,
     ): Promise<SingleLogResult> {
         const nftId = position.typedConfig.nftId;
@@ -1714,10 +1715,10 @@ export class UniswapV3LedgerService {
             }
         }
 
-        // Discover pool price at the event's block number
-        const poolPrice = await poolPriceService.discover(
-            { chainId, poolAddress: position.poolAddress },
-            { blockNumber: Number(blockNumber), blockHash: log.blockHash },
+        // Read the pool price at the event's block from the prefetched map.
+        // Resolved before the transaction opened — see prefetchPoolPrices.
+        const poolPrice = requirePoolPrice(
+            poolPrices, blockNumber, log.blockHash, `position ${this.positionId}`,
         );
         const sqrtPriceX96 = poolPrice.sqrtPriceX96;
         const blockTimestamp = poolPrice.timestamp;

@@ -51,6 +51,8 @@ import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
 import { UniswapV3QuoteTokenService } from "../quote-token/uniswapv3-quote-token-service.js";
 import { EvmBlockService } from "../block/evm-block-service.js";
 import { UniswapV3PoolPriceService } from "../pool-price/uniswapv3-pool-price-service.js";
+import { prefetchPoolPrices } from "../pool-price/pool-price-prefetch.js";
+import type { PoolPriceMap } from "../pool-price/pool-price-prefetch.js";
 import {
     UniswapV3LedgerService,
     type RawLogInput,
@@ -69,7 +71,26 @@ import {
 import { SupportedChainId } from "../../config/evm.js";
 import { CacheService } from "../cache/cache-service.js";
 import { UniswapV3CloseOrderService } from "../close-order/uniswapv3-close-order-service.js";
+import type { CloseOrderChainSnapshot } from "../close-order/uniswapv3-close-order-service.js";
 import { UserWalletService } from "../wallet-perimeter/user-wallet-service.js";
+
+/**
+ * Event logs plus the pool price at each event block, fetched before any write
+ * transaction is opened.
+ *
+ * Produced by {@link UniswapV3PositionService.planPositionLogs}, consumed by
+ * {@link UniswapV3PositionService.importPositionLogs}. The split keeps RPC
+ * round-trips — a mint-block binary search and a full history scan on a first
+ * sync — out of the transaction that does the writing.
+ */
+export interface PositionLogPlan {
+    /** Position as of the fetch */
+    position: UniswapV3Position;
+    /** Logs from `fromBlock` to the upper bound */
+    logs: RawLogInput[];
+    /** Pool price at every block covered by `logs` */
+    poolPrices: PoolPriceMap;
+}
 
 /**
  * Yield state for a position
@@ -881,17 +902,24 @@ export class UniswapV3PositionService {
                 "Position created, importing ledger events",
             );
 
-            // g) Import logs via ledger service
+            // g) Import logs via ledger service. Prices for the freshly fetched
+            // logs are resolved first so the import itself stays database-only.
             const ledgerService = new UniswapV3LedgerService(
                 { positionId: position.id },
                 { prisma: this.prisma },
+            );
+            const poolPrices = await prefetchPoolPrices(
+                chainId,
+                position.poolAddress,
+                logs,
+                this._poolPriceService,
             );
             const userWalletAddresses = await this.buildUserWalletAddresses(userId);
             await ledgerService.importLogsForPosition(
                 position,
                 chainId,
                 logs,
-                this._poolPriceService,
+                poolPrices,
                 userWalletAddresses,
                 dbTx,
             );
@@ -1228,8 +1256,44 @@ export class UniswapV3PositionService {
         dbTx?: PrismaTransactionClient,
     ): Promise<UniswapV3Position> {
         log.methodEntry(this.logger, "refresh", { id, blockNumber });
-        await this.refreshAllPositionLogs(id, blockNumber, dbTx);
-        return this.refreshOnChainState(id, blockNumber, dbTx);
+
+        // Phase 1 — network. The slow part: a first sync binary-searches for the
+        // mint block and scans the full history.
+        const plan = await this.planPositionLogs(id, blockNumber, {}, dbTx);
+
+        // Pin the block and warm the state caches now, so the reads inside the
+        // transaction below hit `fetchPositionState` / `fetchPoolState` /
+        // `fetchTickData` entries that already exist rather than issuing RPC.
+        const { chainId, nftId } = plan.position.typedConfig;
+        const onChainState = await this.fetchPositionState(chainId, nftId, blockNumber);
+        const resolvedBlockNumber = Number(onChainState.blockNumber);
+
+        // Close-order reads are the only RPC in refreshOnChainState that is
+        // never cached, so do them here. Best-effort: reconciliation is
+        // non-fatal, and a null snapshot makes refreshOnChainState fall back to
+        // reading them itself.
+        const closeOrderSnapshot = await this._closeOrderService
+            .fetchChainSnapshot(id, resolvedBlockNumber, dbTx)
+            .catch((error: unknown) => {
+                this.logger.warn(
+                    { positionId: id, error: (error as Error).message },
+                    "Close order chain read failed (non-fatal) — skipping reconciliation",
+                );
+                return null;
+            });
+
+        // Phase 2 — writes.
+        const run = async (tx: PrismaTransactionClient): Promise<UniswapV3Position> => {
+            await this.importPositionLogs(plan, tx);
+            return this.refreshOnChainState(id, blockNumber, tx, closeOrderSnapshot);
+        };
+
+        if (dbTx) return run(dbTx);
+
+        return this._prisma.$transaction(run, {
+            maxWait: 5_000,
+            timeout: 30_000,
+        });
     }
 
     /**
@@ -1242,11 +1306,15 @@ export class UniswapV3PositionService {
      * @param id - Position ID
      * @param blockNumber - Block to read state from
      * @param dbTx - Optional Prisma transaction client
+     * @param closeOrderSnapshot - Close-order chain state already read by the
+     *   caller. Supplying it keeps the two closer-contract reads out of `dbTx`.
+     *   When omitted, close orders are read and reconciled in one step as before.
      */
     private async refreshOnChainState(
         id: string,
         blockNumber: number | "latest" = "latest",
         dbTx?: PrismaTransactionClient,
+        closeOrderSnapshot?: CloseOrderChainSnapshot | null,
     ): Promise<UniswapV3Position> {
         try {
             // 0. Get position to determine pool ID
@@ -1343,13 +1411,23 @@ export class UniswapV3PositionService {
             // 6. Refresh metrics (common fields: value, PnL, fees, price range)
             await this.refreshMetrics(id, resolvedBlockNumber, dbTx);
 
-            // 6.5 Reconcile close orders from on-chain (best-effort)
+            // 6.5 Reconcile close orders from on-chain (best-effort).
+            // When the caller already read the chain (refresh() does, before
+            // opening its transaction), reconcile from that snapshot instead of
+            // reading again from in here.
             try {
-                await this._closeOrderService.refresh(
-                    id,
-                    resolvedBlockNumber,
-                    dbTx,
-                );
+                if (closeOrderSnapshot) {
+                    await this._closeOrderService.reconcileChainSnapshot(
+                        closeOrderSnapshot,
+                        dbTx,
+                    );
+                } else {
+                    await this._closeOrderService.refresh(
+                        id,
+                        resolvedBlockNumber,
+                        dbTx,
+                    );
+                }
             } catch (closeOrderError) {
                 this.logger.warn(
                     {
@@ -1470,6 +1548,26 @@ export class UniswapV3PositionService {
                 "Starting position reset - rebuilding ledger from RPC",
             );
 
+            // 1b. Fetch the full history up front, before anything is deleted.
+            // fromBlock is pinned to the mint block: deriving it from the last
+            // stored event would be wrong here, since those events are about to
+            // go away, and doing the fetch after the delete would put the scan
+            // inside the write path.
+            const mintBlock = await findNftMintBlock(
+                this.evmConfig.getPublicClient(chainId),
+                getPositionManagerAddress(chainId),
+                nftId,
+                getNfpmDeploymentBlock(chainId),
+            );
+            if (!mintBlock) {
+                throw new Error(
+                    `Mint block not found for NFT ${nftId} on chain ${chainId}`,
+                );
+            }
+            const logPlan = await this.planPositionLogs(
+                id, "latest", { fromBlock: mintBlock }, dbTx,
+            );
+
             // 2. Create ledger event service for this position
             const ledgerEventService = new UniswapV3LedgerService(
                 { positionId: id },
@@ -1517,9 +1615,10 @@ export class UniswapV3PositionService {
             }
 
             // 6. Reimport all events from on-chain and emit insert domain events.
-            //    refreshAllPositionLogs() uses mintBlock as fromBlock since there are
-            //    no ledger events after the deletion above.
-            await this.refreshAllPositionLogs(id, "latest", dbTx);
+            //    The plan was built before this transaction opened and pins
+            //    fromBlock to the mint block, since the events it would
+            //    otherwise resume from were just deleted above.
+            await this.importPositionLogs(logPlan, dbTx);
 
             // 7. Refresh position state from on-chain data
             this.logger.info(
@@ -1558,30 +1657,38 @@ export class UniswapV3PositionService {
     }
 
     /**
-     * Sync ledger events from on-chain data without wiping existing events.
+     * Fetch the position's event logs and the pool price at each event block.
+     *
+     * Network phase of the ledger sync — no transaction may be open while this
+     * runs. Feed the result to {@link importPositionLogs}, which writes.
      *
      * Fetches all IncreaseLiquidity, DecreaseLiquidity, and Collect events
-     * from the position's mint block up to `blockNumber`. Already-imported
-     * events are skipped (idempotent). Catch-up reorgs are detected and
-     * handled: orphaned events are deleted before new canonical events are
-     * inserted. Domain events are emitted in order — all reverts first,
-     * then inserts.
+     * from the position's mint block up to `blockNumber`. The database reads
+     * here (the position, the last stored event) only decide where the scan
+     * starts; the import deduplicates by input hash, so a concurrent writer
+     * moving that boundary is harmless.
      *
      * @param id - Position ID (database CUID)
      * @param blockNumber - Upper bound block ("latest" or specific block number)
-     * @param dbTx - Optional Prisma transaction client
-     * @returns The import result with per-log outcomes and final aggregates
+     * @param options.fromBlock - Override the scan start. reset() pins this to
+     *   the mint block, because the events it would otherwise be derived from
+     *   are deleted inside the write transaction.
+     * @returns The logs and their pool prices, ready to import
      * @throws Error if position not found
      * @throws Error if mint block cannot be found on-chain
      */
-    async refreshAllPositionLogs(
+    async planPositionLogs(
         id: string,
         blockNumber: number | "latest" = "latest",
+        options: { fromBlock?: bigint } = {},
         dbTx?: PrismaTransactionClient,
-    ): Promise<ImportLogsResult> {
-        log.methodEntry(this.logger, "refreshAllPositionLogs", { id, blockNumber });
+    ): Promise<PositionLogPlan> {
+        log.methodEntry(this.logger, "planPositionLogs", { id, blockNumber });
 
-        const position = await this.findById(id);
+        // `dbTx` is only for the locating reads. It is set when the caller
+        // already holds a transaction — discover() creating a position and
+        // refreshing it in one — where these rows are not committed yet.
+        const position = await this.findById(id, dbTx);
         if (!position) {
             throw new Error(`Position not found: ${id}`);
         }
@@ -1599,39 +1706,41 @@ export class UniswapV3PositionService {
             { prisma: this._prisma },
         );
 
-        const lastEvent = await ledgerService.findLast(dbTx);
+        let fromBlock = options.fromBlock;
+        if (fromBlock === undefined) {
+            const lastEvent = await ledgerService.findLast(dbTx);
 
-        let fromBlock: bigint;
-        if (!lastEvent) {
-            const mintBlock = await findNftMintBlock(
-                client,
-                nfpmAddress,
-                nftId,
-                deploymentBlock,
-            );
-            if (!mintBlock) {
-                throw new Error(
-                    `Mint block not found for NFT ${nftId} on chain ${chainId}`,
+            if (!lastEvent) {
+                const mintBlock = await findNftMintBlock(
+                    client,
+                    nfpmAddress,
+                    nftId,
+                    deploymentBlock,
                 );
-            }
-            fromBlock = mintBlock;
-        } else {
-            const finalityConfig = this.evmConfig.getFinalityConfig(chainId);
-            let finalizedBlockNumber: bigint;
-            if (finalityConfig.type === "blockTag") {
-                const finalizedBlock = await client.getBlock({
-                    blockTag: "finalized",
-                });
-                finalizedBlockNumber = finalizedBlock.number;
+                if (!mintBlock) {
+                    throw new Error(
+                        `Mint block not found for NFT ${nftId} on chain ${chainId}`,
+                    );
+                }
+                fromBlock = mintBlock;
             } else {
-                const currentBlock = await client.getBlockNumber();
-                finalizedBlockNumber =
-                    currentBlock - BigInt(finalityConfig.minBlockHeight);
+                const finalityConfig = this.evmConfig.getFinalityConfig(chainId);
+                let finalizedBlockNumber: bigint;
+                if (finalityConfig.type === "blockTag") {
+                    const finalizedBlock = await client.getBlock({
+                        blockTag: "finalized",
+                    });
+                    finalizedBlockNumber = finalizedBlock.number;
+                } else {
+                    const currentBlock = await client.getBlockNumber();
+                    finalizedBlockNumber =
+                        currentBlock - BigInt(finalityConfig.minBlockHeight);
+                }
+                fromBlock =
+                    finalizedBlockNumber < lastEvent.typedConfig.blockNumber
+                        ? finalizedBlockNumber
+                        : lastEvent.typedConfig.blockNumber;
             }
-            fromBlock =
-                finalizedBlockNumber < lastEvent.typedConfig.blockNumber
-                    ? finalizedBlockNumber
-                    : lastEvent.typedConfig.blockNumber;
         }
 
         const logs = await this.fetchAllPositionLogs(
@@ -1642,12 +1751,46 @@ export class UniswapV3PositionService {
             toBlock,
         );
 
+        // Resolve the pool price at every event block now, so the import below
+        // is pure database work.
+        const poolPrices = await prefetchPoolPrices(
+            chainId,
+            position.poolAddress,
+            logs,
+            this.poolPriceService,
+        );
+
+        log.methodExit(this.logger, "planPositionLogs", { id, logCount: logs.length });
+        return { position, logs, poolPrices };
+    }
+
+    /**
+     * Import already-fetched logs and emit the resulting domain events.
+     *
+     * Write phase of {@link planPositionLogs} — pure database work, safe to run
+     * inside a caller's transaction.
+     */
+    async importPositionLogs(
+        plan: PositionLogPlan,
+        dbTx?: PrismaTransactionClient,
+    ): Promise<ImportLogsResult> {
+        const { position, logs, poolPrices } = plan;
+        const id = position.id;
+        const chainId = position.chainId;
+
+        log.methodEntry(this.logger, "importPositionLogs", { id });
+
+        const ledgerService = new UniswapV3LedgerService(
+            { positionId: id },
+            { prisma: this._prisma },
+        );
+
         const userWalletAddresses = await this.buildUserWalletAddresses(position.userId);
         const importResult = await ledgerService.importLogsForPosition(
             position,
             chainId,
             logs,
-            this.poolPriceService,
+            poolPrices,
             userWalletAddresses,
             dbTx,
         );
@@ -1784,7 +1927,7 @@ export class UniswapV3PositionService {
             }
         }
 
-        log.methodExit(this.logger, "refreshAllPositionLogs", { id });
+        log.methodExit(this.logger, "importPositionLogs", { id });
         return importResult;
     }
 
