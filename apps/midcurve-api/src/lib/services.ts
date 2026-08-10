@@ -25,7 +25,6 @@ import {
   UniswapV3CloseOrderService,
   SharedContractService,
   AutomationLogService,
-  WebhookConfigService,
   FavoritePoolService,
   UniswapV3SubgraphClient,
   EvmTransactionStatusService,
@@ -58,7 +57,6 @@ let _positionListService: PositionListService | null = null;
 let _uniswapV3CloseOrderService: UniswapV3CloseOrderService | null = null;
 let _sharedContractService: SharedContractService | null = null;
 let _automationLogService: AutomationLogService | null = null;
-let _webhookConfigService: WebhookConfigService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
 let _uniswapV3VaultPositionService: UniswapV3VaultPositionService | null = null;
@@ -249,16 +247,6 @@ export function getAutomationLogService(): AutomationLogService {
     _automationLogService = new AutomationLogService();
   }
   return _automationLogService;
-}
-
-/**
- * Get singleton instance of WebhookConfigService
- */
-export function getWebhookConfigService(): WebhookConfigService {
-  if (!_webhookConfigService) {
-    _webhookConfigService = new WebhookConfigService();
-  }
-  return _webhookConfigService;
 }
 
 /**
