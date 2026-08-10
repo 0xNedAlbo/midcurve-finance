@@ -16,7 +16,6 @@ export type {
   AutomationPlatform,
   BaseLogContext,
   EvmLogContext,
-  SolanaLogContext,
   // Order contexts (extend OrderLogContext)
   OrderLogContext,
   OrderCreatedContext,

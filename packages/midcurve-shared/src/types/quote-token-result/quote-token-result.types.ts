@@ -61,7 +61,6 @@ export interface QuoteTokenResult {
   /**
    * Quote token identifier (protocol-specific)
    * - EVM: normalized address (0x...)
-   * - Solana: mint address (base58)
    */
   quoteTokenId: string;
 

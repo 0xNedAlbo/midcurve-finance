@@ -6,7 +6,6 @@
  *
  * Supported formats:
  * - EVM: "evm:{checksumAddress}" → { platform: 'evm', address }
- * - Future: "solana:{pubkey}", "bitcoin:{address}"
  *
  * @example
  * ```typescript

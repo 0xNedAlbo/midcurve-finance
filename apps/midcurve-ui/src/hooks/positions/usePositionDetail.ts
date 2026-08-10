@@ -5,7 +5,7 @@ interface UsePositionDetailParams {
   protocol: string;
   chainId?: number;
   nftId?: string;
-  positionId?: string; // For future Solana support (base58 string)
+  positionId?: string;
   initialData?: ListPositionData;
   enabled?: boolean;
 }

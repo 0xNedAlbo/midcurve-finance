@@ -15,7 +15,7 @@
 /**
  * Platform type for log context
  */
-export type AutomationPlatform = 'evm' | 'solana';
+export type AutomationPlatform = 'evm';
 
 /**
  * Base context for all automation log entries
@@ -38,16 +38,6 @@ export interface EvmLogContext extends BaseLogContext {
   gasPrice?: string;
   gasUsed?: string;
   operatorAddress?: string;
-}
-
-/**
- * Solana-specific context fields (future)
- */
-export interface SolanaLogContext extends BaseLogContext {
-  platform: 'solana';
-  signature?: string;
-  slot?: number;
-  computeUnits?: number;
 }
 
 // =============================================================================
@@ -259,7 +249,6 @@ export interface OrderModifiedContext extends OrderLogContext {
 export type AutomationLogContext =
   | BaseLogContext
   | EvmLogContext
-  | SolanaLogContext
   | OrderLogContext
   | OrderCreatedContext
   | OrderRegisteredContext

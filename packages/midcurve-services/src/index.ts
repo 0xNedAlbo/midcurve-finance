@@ -2,11 +2,7 @@
  * Midcurve Finance - Shared Services
  *
  * Business logic for concentrated liquidity position management
- * across multiple DEX protocols:
- * - Uniswap V3 (Ethereum)
- * - Orca (Solana)
- * - Raydium (Solana)
- * - PancakeSwap (BSC)
+ * on Uniswap V3 across EVM chains.
  */
 
 // Re-export shared types from @midcurve/shared

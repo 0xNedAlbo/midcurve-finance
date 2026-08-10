@@ -60,7 +60,7 @@ export type AutomationLogType = (typeof AUTOMATION_LOG_TYPES)[number];
 /**
  * Platform type for log context
  */
-export type AutomationPlatform = 'evm' | 'solana';
+export type AutomationPlatform = 'evm';
 
 /**
  * Base context (common to all platforms)

@@ -1506,7 +1506,6 @@ export class CoinGeckoClient {
    * - 'binance-smart-chain' (BSC)
    * - 'polygon-pos' (Polygon)
    * - 'optimistic-ethereum' (Optimism)
-   * - 'solana' (Solana - future)
    *
    * @param params.platform - CoinGecko platform ID (e.g., 'ethereum', 'arbitrum-one')
    * @param params.symbol - Optional partial symbol match (case-insensitive)
