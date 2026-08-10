@@ -19,7 +19,7 @@ import {
   tickToPrice,
   createUniswapV3SimulationEngine,
 } from "@midcurve/shared";
-import type { PoolJSON, SimulationEngine, SimulationResult, CurvePoint, TriggeredEvent } from "@midcurve/shared";
+import type { SimulationEngine, SimulationResult, CurvePoint, TriggeredEvent } from "@midcurve/shared";
 import { SimulationPnLCurve, type TriggerLineData } from "./pnl-curve/simulation-pnl-curve";
 
 interface PortfolioSimulatorProps {
@@ -89,7 +89,7 @@ export function PortfolioSimulator({ position }: PortfolioSimulatorProps) {
 
   // Build or rebuild engine when deps change
   const engine = useMemo(() => {
-    const pool = UniswapV3Pool.fromJSON(position.pool as unknown as PoolJSON);
+    const pool = UniswapV3Pool.fromWire(position.pool);
     const simulationPosition = UniswapV3Position.forSimulation({
       pool,
       isToken0Quote: position.isToken0Quote,

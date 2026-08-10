@@ -15,7 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import { Circle, Check, Loader2, AlertCircle } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import type { Address } from 'viem';
-import { compareAddresses, UniswapV3Pool, UniswapV3Position, type PoolJSON, type Erc20Token, tickToPrice } from '@midcurve/shared';
+import { compareAddresses, UniswapV3Pool, UniswapV3Position, type Erc20Token, tickToPrice } from '@midcurve/shared';
 import { PriceAdjustmentStep } from '@/components/common/PriceAdjustmentStep';
 import { usePriceAdjustmentInteraction } from '@/components/common/usePriceAdjustmentInteraction';
 import { useCreatePositionWizard, computeSwapDirection } from '../context/CreatePositionWizardContext';
@@ -624,7 +624,7 @@ export function TransactionStep() {
         });
 
         // Deserialize JSON to class instance
-        const poolInstance = UniswapV3Pool.fromJSON(result.pool as unknown as PoolJSON);
+        const poolInstance = UniswapV3Pool.fromWire(result.pool);
         setDiscoveredPool(poolInstance);
 
         // Move to mint phase

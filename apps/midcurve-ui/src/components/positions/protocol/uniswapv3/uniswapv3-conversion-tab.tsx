@@ -6,7 +6,6 @@ import type { UniswapV3PositionData } from "@/hooks/positions/uniswapv3/useUnisw
 import type {
   UniswapV3PositionConfigResponse,
   UniswapV3PositionStateResponse,
-  UniswapV3PoolStateResponse,
 } from "@midcurve/api-shared";
 import { ConversionSummary } from "./conversion-summary";
 import { useUniswapV3Conversion } from "@/hooks/positions/uniswapv3/useUniswapV3Conversion";
@@ -32,7 +31,7 @@ export function UniswapV3ConversionTab({ position }: UniswapV3ConversionTabProps
     if (!summary) return null;
 
     const state = position.state as UniswapV3PositionStateResponse;
-    const poolState = position.pool.state as UniswapV3PoolStateResponse;
+    const poolState = position.pool.state;
 
     return applyCurrentPrice(summary, {
       isToken0Quote: position.isToken0Quote,

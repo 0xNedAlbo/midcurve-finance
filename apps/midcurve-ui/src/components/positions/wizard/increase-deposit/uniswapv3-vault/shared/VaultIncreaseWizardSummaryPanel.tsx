@@ -4,7 +4,6 @@ import {
   formatCompactValue,
   compareAddresses,
   UniswapV3Pool,
-  type PoolJSON,
 } from '@midcurve/shared';
 import type {
   UniswapV3VaultPositionConfigResponse,
@@ -103,9 +102,7 @@ export function VaultIncreaseWizardSummaryPanel({
         chainId: poolConfig.chainId,
         address: poolConfig.address,
       });
-      const poolInstance = UniswapV3Pool.fromJSON(
-        result.pool as unknown as PoolJSON
-      );
+      const poolInstance = UniswapV3Pool.fromWire(result.pool);
       setDiscoveredPool(poolInstance);
     } catch (error) {
       console.error('Failed to refresh pool:', error);

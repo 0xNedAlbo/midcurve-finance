@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { UniswapV3Pool, type PoolJSON } from '@midcurve/shared';
+import { UniswapV3Pool } from '@midcurve/shared';
 import type { UniswapV3VaultPositionConfigResponse } from '@midcurve/api-shared';
 import { FullPageWizardLayout } from '@/components/layout/wizard';
 import {
@@ -209,9 +209,7 @@ function DataFetcher({
       discoverPool
         .mutateAsync({ chainId: posChainId, address: poolAddress })
         .then((result) => {
-          const poolInstance = UniswapV3Pool.fromJSON(
-            result.pool as unknown as PoolJSON
-          );
+          const poolInstance = UniswapV3Pool.fromWire(result.pool);
           setDiscoveredPool(poolInstance);
         })
         .catch((error) => {

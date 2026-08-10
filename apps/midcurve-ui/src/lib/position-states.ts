@@ -379,6 +379,14 @@ export function calculatePositionStates(
   const baseTokenConfig = baseToken.config as { address: string };
   const quoteTokenConfig = quoteToken.config as { address: string };
 
+  // Deliberately NOT converted to UniswapV3Pool.fromWire() with the other 17
+  // sites in issue #57. Those casts were a typing artifact; this one is not.
+  // `BasicPosition.pool` declares far less than a pool — no id, protocol,
+  // config, or timestamps, and only two of the five state fields — while
+  // `forSimulation` below reads feeBps, tickSpacing, the pool config and the
+  // pool-level liquidity/feeGrowth. The cast papers over a real mismatch, and
+  // widening BasicPosition to make it removable would bend the type to fit the
+  // problem. See the finding on issue #57.
   const pool = UniswapV3Pool.fromJSON(position.pool as unknown as PoolJSON);
   const costBasis = BigInt(pnlBreakdown.costBasis);
   const liquidity = BigInt(position.state.liquidity);

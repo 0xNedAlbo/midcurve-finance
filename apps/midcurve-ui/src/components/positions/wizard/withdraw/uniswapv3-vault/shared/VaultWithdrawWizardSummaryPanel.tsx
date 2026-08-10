@@ -4,7 +4,6 @@ import {
   formatCompactValue,
   compareAddresses,
   UniswapV3Pool,
-  type PoolJSON,
   getTokenAmountsFromLiquidity,
   calculatePnL,
 } from '@midcurve/shared';
@@ -94,9 +93,7 @@ export function VaultWithdrawWizardSummaryPanel({
         chainId: poolConfig.chainId,
         address: poolConfig.address,
       });
-      const poolInstance = UniswapV3Pool.fromJSON(
-        result.pool as unknown as PoolJSON
-      );
+      const poolInstance = UniswapV3Pool.fromWire(result.pool);
       setDiscoveredPool(poolInstance);
     } catch (error) {
       console.error('Failed to refresh pool:', error);

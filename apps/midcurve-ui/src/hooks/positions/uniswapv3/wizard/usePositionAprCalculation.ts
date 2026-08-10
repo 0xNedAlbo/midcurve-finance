@@ -11,7 +11,7 @@
  */
 
 import { useMemo } from "react";
-import type { UniswapV3PoolResponse, Erc20TokenResponse } from "@midcurve/api-shared";
+import type { UniswapV3PoolWire, Erc20TokenWire } from "@midcurve/api-shared";
 import type { EvmChainSlug } from "@/config/chains";
 import {
   getTokenAmountsFromLiquidity,
@@ -23,12 +23,12 @@ import { usePoolMetrics } from "./usePoolMetrics";
 
 interface UsePositionAprCalculationParams {
   chain: EvmChainSlug;
-  pool: UniswapV3PoolResponse;
+  pool: UniswapV3PoolWire;
   liquidity: bigint;
   tickLower: number;
   tickUpper: number;
-  baseToken: Erc20TokenResponse;
-  quoteToken: Erc20TokenResponse;
+  baseToken: Erc20TokenWire;
+  quoteToken: Erc20TokenWire;
 }
 
 interface AprCalculationResult {

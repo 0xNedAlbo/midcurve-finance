@@ -24,7 +24,6 @@ import {
   UniswapV3Position,
   CloseOrderSimulationOverlay,
 } from "@midcurve/shared";
-import type { PoolJSON } from "@midcurve/shared";
 import { extractCloseOrderData } from "@/lib/position-states";
 import { PnLCurveTooltip } from "../../pnl-curve-tooltip";
 
@@ -98,7 +97,7 @@ export function UniswapV3MiniPnLCurve({
     if (liquidity <= 0n) return null;
 
     try {
-      const pool = UniswapV3Pool.fromJSON(position.pool as unknown as PoolJSON);
+      const pool = UniswapV3Pool.fromWire(position.pool);
       const costBasis = BigInt(position.costBasis);
       if (costBasis === 0n) return null;
 
