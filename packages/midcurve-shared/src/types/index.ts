@@ -31,6 +31,7 @@ export {
   BasicCurrencyConfig,
 } from './token/index.js';
 export type {
+  Erc20TokenJSON,
   Erc20TokenParams,
   Erc20TokenRow,
   Erc20TokenConfigData,
@@ -59,6 +60,7 @@ export {
   UniswapV3PoolConfig,
 } from './pool/index.js';
 export type {
+  UniswapV3PoolJSON,
   UniswapV3PoolParams,
   UniswapV3PoolRow,
   UniswapV3PoolConfigData,

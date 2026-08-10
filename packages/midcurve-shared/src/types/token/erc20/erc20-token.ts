@@ -32,6 +32,27 @@ export interface Erc20TokenRow {
 }
 
 /**
+ * Serialized shape of an Erc20Token as it travels over JSON.
+ *
+ * The concrete counterpart to {@link TokenJSON}: `tokenType` is narrowed to the
+ * discriminator this class answers to, and `config` is the real config shape
+ * instead of `Record<string, unknown>`. `TokenJSON` stays loose on purpose —
+ * it describes *any* token — so it cannot express either of those, which is why
+ * deserializing a concrete wire payload through it needs a cast.
+ *
+ * Lives here rather than in `@midcurve/api-shared` because a class's serialized
+ * shape is a fact about the class, not about the transport that happens to
+ * carry it. `@midcurve/api-shared` re-exports it as `Erc20TokenWire`.
+ *
+ * @see Erc20Token.fromWire
+ */
+export interface Erc20TokenJSON
+  extends Omit<TokenJSON, 'tokenType' | 'config'> {
+  tokenType: 'erc20';
+  config: Erc20TokenConfigJSON;
+}
+
+/**
  * ERC-20 token implementation.
  *
  * Represents an ERC-20 token on an EVM-compatible chain.
@@ -169,6 +190,47 @@ export class Erc20Token extends BaseToken {
       marketCap: json.marketCap,
       tokenHash: json.tokenHash,
       config: Erc20TokenConfig.fromJSON(json.config as unknown as Erc20TokenConfigJSON),
+      createdAt: new Date(json.createdAt),
+      updatedAt: new Date(json.updatedAt),
+    });
+  }
+
+  /**
+   * Create Erc20Token from its wire shape (API response).
+   *
+   * The typed door that {@link Erc20Token.fromJSON} cannot be: `Erc20TokenJSON`
+   * names the concrete config shape, so no cast is needed to reach it. Prefer
+   * this over `fromJSON` whenever the payload came from `apiClient` or another
+   * JSON boundary and is known to be an ERC-20 token.
+   *
+   * @param json - Wire payload, as produced by `serializeErc20Token`
+   * @returns Erc20Token instance
+   * @throws Error if tokenType is not 'erc20'
+   *
+   * @example
+   * ```typescript
+   * const { data } = await apiClient.get('/api/v1/tokens/erc20/...');
+   * const token = Erc20Token.fromWire(data);
+   * console.log(token.address); // '0x...'
+   * ```
+   */
+  static fromWire(json: Erc20TokenJSON): Erc20Token {
+    // Statically dead given the literal type, but this is a JSON boundary —
+    // the type is a claim about the payload, not a guarantee.
+    if (json.tokenType !== 'erc20') {
+      throw new Error(`Expected tokenType 'erc20', got '${json.tokenType}'`);
+    }
+
+    return new Erc20Token({
+      id: json.id,
+      name: json.name,
+      symbol: json.symbol,
+      decimals: json.decimals,
+      logoUrl: json.logoUrl,
+      coingeckoId: json.coingeckoId,
+      marketCap: json.marketCap,
+      tokenHash: json.tokenHash,
+      config: Erc20TokenConfig.fromJSON(json.config),
       createdAt: new Date(json.createdAt),
       updatedAt: new Date(json.updatedAt),
     });
