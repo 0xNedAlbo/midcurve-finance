@@ -2,7 +2,6 @@ import { useAuth } from '../providers/AuthProvider';
 import { useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { UserDropdown } from '../components/auth/user-dropdown';
-import { NotificationBell } from '../components/notifications/notification-bell';
 import { CreatePositionDropdown } from '../components/positions/create-position-dropdown';
 import { PositionList } from '../components/positions/position-list';
 
@@ -40,7 +39,6 @@ export function DashboardPage() {
             <h1 className="text-4xl font-bold text-white mb-2">Midcurve Finance</h1>
           </div>
           <div className="flex items-center gap-3">
-            <NotificationBell />
             <UserDropdown />
           </div>
         </header>

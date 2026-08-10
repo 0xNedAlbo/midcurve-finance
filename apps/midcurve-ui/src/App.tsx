@@ -9,7 +9,6 @@ import { HomePage } from './pages/HomePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { PositionDetailPage } from './pages/PositionDetailPage';
 import { VaultPositionDetailPage } from './pages/VaultPositionDetailPage';
-import { NotificationsPage } from './pages/NotificationsPage';
 import { WizardExamplePage } from './pages/WizardExamplePage';
 import { CreatePositionPage } from './pages/CreatePositionPage';
 import { IncreaseDepositPage } from './pages/IncreaseDepositPage';
@@ -67,10 +66,6 @@ function ConfigGate() {
               <Route
                 path="/positions/uniswapv3-vault/:chain/:vaultAddress/:ownerAddress"
                 element={<VaultPositionDetailPage />}
-              />
-              <Route
-                path="/notifications"
-                element={<NotificationsPage />}
               />
               <Route
                 path="/wizard-example"
