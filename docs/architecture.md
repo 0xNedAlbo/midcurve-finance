@@ -178,7 +178,6 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
   - **Pools:** `pool`, `pool-price`, `pool-search`, `favorite-pool`
   - **Positions:** `position`, `position-list`, `position-ledger`, `position-apr`
   - **Automation:** `automation`, `close-order`, `swap-router`
-  - **Notifications:** `notifications` (in-app + webhook)
   - **Other:** `cache`, `system-config`, `block`, `transaction`, `volatility`
 
 - **External clients** (under `src/clients/`):
@@ -273,9 +272,8 @@ This is a **Turborepo monorepo** with a **single git repository** at the root le
 - **Models** (~28 models + supporting enums), grouped by domain:
   - **Identity & auth:** `User`, `Session`, `ApiKey`, `UserSettings`, `UserWallet`, `UserAllowListEntry`
   - **Tokens:** `Token`, `CoingeckoToken`
-  - **Positions (UniswapV3):** `Position`, `PositionLedgerEvent`, `PositionAprPeriod`, `PositionRangeStatus`
+  - **Positions (UniswapV3):** `Position`, `PositionLedgerEvent`, `PositionAprPeriod`
   - **Close orders & automation:** `CloseOrder`, `AutomationLog`, `OnchainDataSubscribers`, `SharedContract`
-  - **Notifications:** `UserNotification`, `UserWebhookConfig` (with `NotificationEventType` enum)
   - **Domain events (outbox pattern):** `DomainEvent`, `DomainEventOutbox`
   - **Infrastructure:** `Cache` (distributed cache), `SystemConfig` (e.g. WalletConnect project ID set via setup wizard)
 
@@ -373,8 +371,7 @@ midcurve-ui/
 - `/api/v1/positions/*` - Position CRUD, history, APR, simulations
 - `/api/v1/transactions/*` - On-chain transaction status / lookups
 - `/api/v1/swap/*` - DEX swap quotes and execution helpers
-- `/api/v1/automation/*` - Close orders, range alerts, vault positions
-- `/api/v1/notifications/*` - In-app notifications and webhook configs
+- `/api/v1/automation/*` - Close orders, automation logs, shared contracts
 
 **Key Characteristics:**
 - Session-based auth - Custom session middleware with cookies
@@ -443,7 +440,6 @@ midcurve-signer/
 - **MidcurveSwapRouter** - On-chain DEX aggregator for post-close token swaps
 
 **Workers** (under `src/workers/`):
-- `range-monitor.ts` — platform-agnostic range-monitor worker; consumes pool-price events from RabbitMQ and emits range-exit events
 - `uniswapv3/uniswapv3-close-order-monitor.ts` — watches close-order trigger conditions (SIL/TIP) for UniswapV3 positions and enqueues executions
 - `uniswapv3/uniswapv3-close-order-executor.ts` — executes close orders via the Diamond proxy contract
 - `uniswapv3/uniswapv3-nft-execution.ts` — execution path for direct NFT positions
@@ -585,8 +581,8 @@ midcurve-business-logic/
 - **Pino** - Structured logging
 - **Zod** - Tool input validation
 
-**Tools exposed (15, all read-only):**
-- *Identity & portfolio:* `get_user`, `list_positions`, `get_position`, `list_close_orders`, `get_pool`, `list_notifications`
+**Tools exposed (14, all read-only):**
+- *Identity & portfolio:* `get_user`, `list_positions`, `get_position`, `list_close_orders`, `get_pool`
 - *Per-position deep-dive:* `get_position_conversion`, `get_position_apr`
 - *Per-position simulation:* `simulate_position_at_price`, `generate_position_pnl_curve`
 - *Pure-math helpers:* `compute_token_amounts_for_range`, `simulate_swap_output`, `compute_liquidity_for_budget`, `convert_price_and_tick`

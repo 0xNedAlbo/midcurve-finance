@@ -26,7 +26,7 @@ Today there are two position families:
 
 A direct concentrated-liquidity NFT minted on the Uniswap V3 NonfungiblePositionManager (NFPM). The user owns the NFT in their wallet; Midcurve tracks it read-only and (when the user opts in) registers a close order on a deployed `UniswapV3PositionCloser` Diamond proxy.
 
-**Idea & purpose.** The canonical Uniswap V3 LP experience: pick a tick range, deposit token0/token1, earn swap fees while the price is inside the range. Midcurve adds the missing risk-management layer — quote-token PnL accounting, APR tracking per fee-collection period, range-exit notifications, and conditional close orders. The NFT stays in the user's wallet; the protocol contract only acts via the operator approval the user grants.
+**Idea & purpose.** The canonical Uniswap V3 LP experience: pick a tick range, deposit token0/token1, earn swap fees while the price is inside the range. Midcurve adds the missing risk-management layer — quote-token PnL accounting, APR tracking per fee-collection period, and conditional close orders. The NFT stays in the user's wallet; the protocol contract only acts via the operator approval the user grants.
 
 **Identity.**
 - `chainId` + `nftId` (the NFPM token ID) uniquely identify the position on-chain.
@@ -182,9 +182,13 @@ The on-chain registration transaction is built by the API but signed by the user
 
 Automation is opt-in. Each automated behaviour is driven by domain events flowing through RabbitMQ exchanges; nothing polls on a timer (per [`.claude/rules/automation-workers.md`](../.claude/rules/automation-workers.md)). The on-chain pieces are the position-closer Diamond contracts; the off-chain pieces live in `apps/midcurve-automation/` and `apps/midcurve-business-logic/`.
 
-### Range monitoring & notifications
+### Range status
 
-A `PositionRangeStatus` row (1:1 with `Position`) tracks `isInRange`. When the on-chain price crosses a tick boundary of the position, the onchain-data layer emits a pool-price event; the range monitor recomputes `isInRange`, persists the new value, and — on a transition — emits a `UserNotification` (and a webhook hit if configured via `UserWebhookConfig`).
+Range status is **derived, never stored**: every surface that shows it compares
+the pool's current tick against the position's `tickLower`/`tickUpper` at read
+time. There is no persisted range status, no range-monitoring worker, and no
+alert on a range transition — a position going out of range is visible when the
+position is next viewed, and nowhere else.
 
 ### Close orders (Stop-In-Loss / Take-In-Profit)
 
@@ -332,7 +336,7 @@ The protocol-specific metrics live in the `config` (immutable) and `state` (muta
 
 **Computed metrics** — `UniswapV3PositionMetrics` (from `fetchMetrics`):
 
-`currentValue`, `costBasis`, `realizedPnl`, `unrealizedPnl`, `collectedYield`, `unclaimedYield`, `lastYieldClaimedAt`, `priceRangeLower`, `priceRangeUpper`, `isOwnedByUser`. The `PositionRangeStatus` 1:1 row adds `isInRange` and protocol-specific tracking data (`lastSqrtPriceX96`, `lastTick`).
+`currentValue`, `costBasis`, `realizedPnl`, `unrealizedPnl`, `collectedYield`, `unclaimedYield`, `lastYieldClaimedAt`, `priceRangeLower`, `priceRangeUpper`, `isOwnedByUser`.
 
 **PnL summary** — `UniswapV3PositionPnLSummary` (from `fetchPnLSummary`):
 
@@ -376,9 +380,11 @@ totalPnl           = realizedSubtotal + unrealizedSubtotal
 - **User liquidity is derived, not stored.** The user's share of the vault's liquidity is computed at read time as `liquidity * sharesBalance / totalSupply`.
 - **VAULT_*** ledger event types are emitted instead of the bare LP events (see [Event taxonomy](#event-taxonomy)).
 
-### Common to both: `PositionRangeStatus`
+### Common to both: range status
 
-Both protocols write to the same `PositionRangeStatus` row when the underlying pool's tick crosses a position boundary. The `data` JSON field is protocol-specific (currently `{ lastSqrtPriceX96, lastTick }` for UniswapV3). The `isInRange` flag is what drives in-range / below-range / above-range UI badges and notifications.
+For both protocols the in-range / below-range / above-range badge is computed at
+read time from the pool's current tick and the position's tick bounds. Nothing
+persists it, so there is no row to keep in sync and no staleness window.
 
 ---
 
@@ -387,7 +393,7 @@ Both protocols write to the same `PositionRangeStatus` row when the underlying p
 - [philosophy.md](./philosophy.md) — Quote/base paradigm, risk definition, why we abandoned IL
 - [architecture.md](./architecture.md) — System architecture, packages, services, deployment
 - [`packages/midcurve-shared/src/types/position/`](../packages/midcurve-shared/src/types/position/) — Authoritative position type definitions
-- [`packages/midcurve-database/prisma/schema.prisma`](../packages/midcurve-database/prisma/schema.prisma) — Position, ledger event, APR period, range status, close order models
+- [`packages/midcurve-database/prisma/schema.prisma`](../packages/midcurve-database/prisma/schema.prisma) — Position, ledger event, APR period, close order models
 - [`apps/midcurve-mcp-server/README.md`](../apps/midcurve-mcp-server/README.md) — Read-only API surface for Claude clients (16 tools, several position-specific)
 - [`.claude/rules/bigint-precision.md`](../.claude/rules/bigint-precision.md) — Why every monetary value is a bigint
 - [`.claude/rules/platform-agnostic-design.md`](../.claude/rules/platform-agnostic-design.md) — How protocol-specific data is split between `config` and `state`

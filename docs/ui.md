@@ -13,7 +13,7 @@ The two position types currently rendered by the UI are:
 
 ## a) Positions List
 
-The list lives on the dashboard at [`/dashboard`](../apps/midcurve-ui/src/pages/DashboardPage.tsx). The page header shows the app title, a notification bell, and a user dropdown; the section header carries the **Add Position** dropdown (described in section [c](#c-add-position-menu)). The dashboard has no tab bar — the positions view is the whole page.
+The list lives on the dashboard at [`/dashboard`](../apps/midcurve-ui/src/pages/DashboardPage.tsx). The page header shows the app title and a user dropdown; the section header carries the **Add Position** dropdown (described in section [c](#c-add-position-menu)). The dashboard has no tab bar — the positions view is the whole page.
 
 The list itself is implemented in [`PositionList`](../apps/midcurve-ui/src/components/positions/position-list.tsx) and renders one row per position via protocol-specific card components.
 
@@ -329,8 +329,6 @@ The pages below exist in the SPA but are **not** about positions and are deliber
 | [`SystemConfigPage`](../apps/midcurve-ui/src/pages/SystemConfigPage.tsx) | `/system-config` | Admin: edit system config post-setup | `admin.md` |
 | [`WalletManagementPage`](../apps/midcurve-ui/src/pages/WalletManagementPage.tsx) | `/wallets` | User-side: link/unlink wallets to the account, set primary wallet | `auth-and-onboarding.md` |
 | [`ApiKeysPage`](../apps/midcurve-ui/src/pages/ApiKeysPage.tsx) | `/api-keys` | Create/revoke `mck_…` API keys for the MCP server and other clients | `mcp-and-api-keys.md` |
-| [`NotificationsPage`](../apps/midcurve-ui/src/pages/NotificationsPage.tsx) | `/notifications` | In-app notification feed (range exits, close-order executions); webhook configuration | `notifications.md` |
-| [Notification bell](../apps/midcurve-ui/src/components/notifications/notification-bell.tsx) | (header) | Compact unread-count badge on the dashboard header | `notifications.md` |
 | [`WizardExamplePage`](../apps/midcurve-ui/src/pages/WizardExamplePage.tsx) | `/wizard-example` | Internal example/playground for the wizard primitives | (developer-only, no user doc planned) |
 
 The **swap** UI (under [`components/swap/`](../apps/midcurve-ui/src/components/swap/)) is also out of scope here — it is a standalone token-swap surface, not a position-management view.

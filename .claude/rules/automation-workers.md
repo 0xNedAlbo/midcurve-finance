@@ -6,7 +6,7 @@
 
 ## Automation Worker Pattern — Domain Event–Driven Subscription Lifecycle
 
-Automation workers (RangeMonitor, CloseOrderMonitor) follow this pattern.
+Automation workers (CloseOrderMonitor) follow this pattern.
 New workers that monitor on-chain data must follow it too.
 
 ### No Polling
@@ -33,13 +33,13 @@ New workers that monitor on-chain data must follow it too.
 
 ### Per-Entity DB Subscriptions
 
-- 1 `OnchainDataSubscribers` row per entity (position, order), not per pool
+- 1 `OnchainDataSubscribers` row per entity (order), not per pool
 - Subscription ID format: `auto:{consumer}:{entityId}`
-  - `auto:range-monitor:{positionId}`
   - `auto:close-order:{orderId}`
 - Use `AutomationSubscriptionService` for all DB subscription CRUD
-  - `ensurePositionSubscription()` / `removePositionSubscription()`
   - `ensureOrderSubscription()` / `removeOrderSubscription()`
+  - A new entity type adds its own pair; there is no generic position variant
+    (the range monitor's was removed with the worker in #120)
 
 ### Domain Event Subscription
 

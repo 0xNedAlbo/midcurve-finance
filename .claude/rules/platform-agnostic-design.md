@@ -65,9 +65,9 @@ Trailhead: issue #83.
 ### File & Naming Conventions
 
 - All platform-specific code must reflect its platform in path and name
-- ✅ workers/uniswapv3/uniswapv3-range-monitor.ts
+- ✅ workers/uniswapv3/uniswapv3-close-order-monitor.ts
 - ✅ services/uniswapv3/uniswapv3-position-service.ts
-- ❌ workers/range-monitor.ts
+- ❌ workers/close-order-monitor.ts
 - ❌ services/position-service.ts (if it's platform-specific)
 - Platform-agnostic code lives at the parent level without a platform prefix
 
