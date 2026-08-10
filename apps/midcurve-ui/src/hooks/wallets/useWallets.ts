@@ -49,7 +49,7 @@ export function useAddWallet() {
     AddWalletResponseData,
     Error,
     {
-      walletType: string;
+      walletType: 'evm';
       address: string;
       signMessageAsync: (args: { message: string }) => Promise<`0x${string}`>;
       label?: string;
