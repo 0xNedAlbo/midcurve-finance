@@ -19,7 +19,6 @@ import {
 import { UniswapV3VaultPosition } from '@midcurve/shared';
 import { serializeUniswapV3VaultPosition } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3VaultPositionService,
   getUniswapV3CloseOrderService,
@@ -56,29 +55,22 @@ export async function POST(
       const { chainId, vaultAddress, ownerAddress } = validation.data;
       const positionHash = UniswapV3VaultPosition.createHash(chainId, vaultAddress, ownerAddress);
 
-      const result = await prisma.$transaction(async (tx) => {
-        const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(user.id, positionHash, tx);
-        if (!dbPosition) return null;
+      // No transaction here on purpose. refresh() does its own network reads
+      // first and opens a short transaction only for the writes; wrapping it
+      // would put seconds of RPC back inside a transaction and blow the
+      // interactive-transaction timeout.
+      const dbPosition = await getUniswapV3VaultPositionService().findByPositionHash(user.id, positionHash);
 
-        const refreshedPosition = await getUniswapV3VaultPositionService().refresh(dbPosition.id, 'latest', tx);
-
-        const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(
-          refreshedPosition.id,
-          {},
-          tx
-        );
-
-        return { position: refreshedPosition, closeOrders };
-      });
-
-      if (!result) {
+      if (!dbPosition) {
         const errorResponse = createErrorResponse(ApiErrorCode.POSITION_NOT_FOUND, 'Vault position not found',
           `No vault position found for chainId ${chainId} and vaultAddress ${vaultAddress}`);
         apiLog.requestEnd(apiLogger, requestId, 404, Date.now() - startTime);
         return NextResponse.json(errorResponse, { status: ErrorCodeToHttpStatus[ApiErrorCode.POSITION_NOT_FOUND] });
       }
 
-      const { position, closeOrders } = result;
+      const position = await getUniswapV3VaultPositionService().refresh(dbPosition.id);
+      const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(position.id, {});
+
       const serializedPosition: GetUniswapV3VaultPositionResponse = {
         ...serializeUniswapV3VaultPosition(position),
         closeOrders: closeOrders.map(serializeCloseOrder),

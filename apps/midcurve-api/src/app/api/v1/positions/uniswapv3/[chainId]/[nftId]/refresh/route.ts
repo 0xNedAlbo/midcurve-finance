@@ -21,7 +21,6 @@ import {
 import { GetUniswapV3PositionParamsSchema } from '@midcurve/api-shared';
 import { serializeUniswapV3Position, serializeCloseOrder } from '@/lib/serializers';
 import { apiLogger, apiLog } from '@/lib/logger';
-import { prisma } from '@/lib/prisma';
 import {
   getUniswapV3PositionService,
   getUniswapV3CloseOrderService,
@@ -92,44 +91,18 @@ export async function POST(
         userId: user.id,
       });
 
-      // 3. Execute lookup and refresh within a transaction for consistency
-      const result = await prisma.$transaction(async (tx) => {
-        // 3a. Fast indexed lookup by positionHash
-        const dbPosition = await getUniswapV3PositionService().findByPositionHash(
-          user.id,
-          positionHash,
-          tx
-        );
-
-        if (!dbPosition) {
-          return null;
-        }
-
-        apiLog.businessOperation(apiLogger, requestId, 'refresh', 'position', dbPosition.id, {
-          chainId,
-          nftId,
-          positionHash,
-        });
-
-        // 3b. Refresh position from on-chain data
-        const refreshedPosition = await getUniswapV3PositionService().refresh(
-          dbPosition.id,
-          'latest',
-          tx
-        );
-
-        // 3c. Fetch all close orders for this position
-        const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(
-          dbPosition.id,
-          {},
-          tx
-        );
-
-        return { position: refreshedPosition, closeOrders };
-      });
+      // 3. Look up, then refresh.
+      // No transaction wraps this on purpose: refresh() fetches from the chain
+      // first and opens a short transaction only for its writes. Wrapping it
+      // would put the history scan back inside a transaction and blow the
+      // interactive-transaction timeout.
+      const dbPosition = await getUniswapV3PositionService().findByPositionHash(
+        user.id,
+        positionHash
+      );
 
       // Handle position not found
-      if (!result) {
+      if (!dbPosition) {
         const errorResponse = createErrorResponse(
           ApiErrorCode.POSITION_NOT_FOUND,
           'Position not found',
@@ -143,7 +116,20 @@ export async function POST(
         });
       }
 
-      const { position, closeOrders } = result;
+      apiLog.businessOperation(apiLogger, requestId, 'refresh', 'position', dbPosition.id, {
+        chainId,
+        nftId,
+        positionHash,
+      });
+
+      // 3b. Refresh position from on-chain data
+      const position = await getUniswapV3PositionService().refresh(dbPosition.id);
+
+      // 3c. Fetch all close orders for this position
+      const closeOrders = await getUniswapV3CloseOrderService().findByPositionId(
+        dbPosition.id,
+        {}
+      );
 
       apiLog.businessOperation(apiLogger, requestId, 'refreshed', 'position', position.id, {
         chainId,
