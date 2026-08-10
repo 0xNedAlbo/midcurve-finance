@@ -14,7 +14,7 @@ datasource db {
 }
 
 // Models for concentrated liquidity positions
-// Supporting: Uniswap V3 (Ethereum), Orca (Solana), Raydium (Solana), PancakeSwap (BSC)
+// Supporting: Uniswap V3 on EVM chains
 
 // =============================================================================
 // Authentication Models
@@ -147,7 +147,7 @@ model Token {
   updatedAt DateTime @updatedAt
 
   // Common required fields
-  tokenType String // 'evm-erc20' or 'solana-spl'
+  tokenType String // 'erc20' or 'basic-currency'
   name      String
   symbol    String
   decimals  Int
@@ -222,7 +222,7 @@ model Position {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Owner wallet — identifies which wallet holds the on-chain asset
-  // Format: "{platform}:{address}" e.g. "evm:0x1234..." or "solana:ABC..."
+  // Format: "{platform}:{address}" e.g. "evm:0x1234..."
   // Nullable initially for migration, will become required after backfill
   ownerWallet String?
 
@@ -588,7 +588,6 @@ model AutomationLog {
   // Platform-independent context (JSON)
   // Contains all event details in a flexible, extensible structure
   // EVM: { platform: 'evm', chainId, txHash, gasLimit, gasPrice, gasUsed, ... }
-  // Solana (future): { platform: 'solana', signature, slot, ... }
   // Common: { triggerPrice, currentPrice, amounts, error, retryCount, ... }
   context Json?
 
@@ -808,7 +807,14 @@ model UserWallet {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Type discriminator (platform)
-  walletType String // 'evm' | 'solana' | 'bitcoin'
+  //
+  // 'evm' is the only accepted value, and that is deliberate — not an oversight
+  // and not a migration left half-done. Bitcoin and Solana were removed as wallet
+  // platforms on purpose (issue #114); they are not planned, not parked, not deferred.
+  // The discriminator is kept as the seam a future non-EVM wallet type would attach
+  // to, which costs nothing here because this is a plain String, not a Prisma enum.
+  // Do not delete it as leftover.
+  walletType String // 'evm'
 
   // Human-readable composite key: "evm/{checksummed-address}"
   // No chainId — an EVM wallet is the same identity across all chains
@@ -818,9 +824,7 @@ model UserWallet {
   label String?
 
   // Platform-specific immutable config (JSON)
-  // EVM:     { address: "0xABC..." }
-  // Solana:  { address: "ABC..." }
-  // Bitcoin: { address: "bc1q..." }
+  // EVM: { address: "0xABC..." }
   config Json
 
   // Whether this is the primary/signing wallet (SIWE login wallet)

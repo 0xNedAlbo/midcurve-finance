@@ -7,7 +7,7 @@
 
 export interface CreateUserWalletInput {
   userId: string;
-  walletType: string; // 'evm' | 'solana' | 'bitcoin'
+  walletType: string; // 'evm' — the only accepted value; see UserWallet.walletType in schema.prisma
   address: string; // Raw address — service builds walletHash and config
   label?: string;
   isPrimary?: boolean;

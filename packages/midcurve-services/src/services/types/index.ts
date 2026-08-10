@@ -100,7 +100,6 @@ export type {
   AutomationPlatform,
   BaseLogContext,
   EvmLogContext,
-  SolanaLogContext,
   OrderCreatedContext,
   OrderTriggeredContext,
   OrderExecutingContext,

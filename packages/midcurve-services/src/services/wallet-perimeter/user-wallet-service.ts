@@ -22,7 +22,8 @@ export class UserWalletService {
 
   /**
    * Build walletHash and config from walletType and raw address.
-   * EVM: normalizes address to EIP-55 checksum.
+   * EVM — the only supported wallet type — normalizes the address to EIP-55 checksum.
+   * Every other walletType is rejected.
    */
   private buildWalletData(walletType: string, address: string): { walletHash: string; config: Record<string, unknown> } {
     switch (walletType) {
@@ -33,16 +34,6 @@ export class UserWalletService {
           config: { address: normalized },
         };
       }
-      case 'solana':
-        return {
-          walletHash: `solana/${address}`,
-          config: { address },
-        };
-      case 'bitcoin':
-        return {
-          walletHash: `bitcoin/${address}`,
-          config: { address },
-        };
       default:
         throw new Error(`Unsupported wallet type: ${walletType}`);
     }

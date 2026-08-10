@@ -461,7 +461,7 @@ export const walletsApi = {
   /**
    * Request a challenge message for wallet ownership verification
    */
-  getChallenge(walletType: string, address: string) {
+  getChallenge(walletType: 'evm', address: string) {
     return apiClient.post<WalletChallengeResponseData>('/api/v1/user/wallets/challenge', {
       walletType,
       address,

@@ -39,8 +39,11 @@ export type ListUserWalletsResponse = ApiResponse<ListUserWalletsResponseData>;
 // WALLET CHALLENGE (ownership verification)
 // =============================================================================
 
+// walletType is pinned to 'evm' so a non-EVM value is rejected at the boundary
+// with a 400 rather than throwing out of UserWalletService as a 500. EVM is the
+// only supported wallet platform — see UserWallet.walletType in schema.prisma.
 export const WalletChallengeRequestSchema = z.object({
-  walletType: z.string().min(1),
+  walletType: z.literal('evm'),
   address: z.string().min(1),
 });
 
@@ -58,7 +61,7 @@ export type WalletChallengeResponse = ApiResponse<WalletChallengeResponseData>;
 // =============================================================================
 
 export const AddWalletRequestSchema = z.object({
-  walletType: z.string().min(1),
+  walletType: z.literal('evm'),
   address: z.string().min(1),
   signature: z.string().min(1),
   nonce: z.string().min(1),

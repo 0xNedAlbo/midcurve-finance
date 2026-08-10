@@ -102,14 +102,6 @@ export const queryKeys = {
       },
     },
 
-    // Future: Orca (Solana)
-    orca: {
-      all: ['positions', 'orca'] as const,
-      details: () => [...queryKeys.positions.orca.all, 'detail'] as const,
-      detail: (positionId: string) =>
-        [...queryKeys.positions.orca.details(), positionId] as const,
-      // ... similar structure
-    },
   },
 
   // ============================================
@@ -170,12 +162,6 @@ export const queryKeys = {
       searches: () => [...queryKeys.tokens.erc20.all, 'search'] as const,
       search: (chainId: number, query: { symbol?: string; name?: string; address?: string }) =>
         [...queryKeys.tokens.erc20.searches(), chainId, query] as const,
-    },
-
-    // Future: Solana SPL tokens
-    spl: {
-      all: ['tokens', 'spl'] as const,
-      // ... similar structure
     },
   },
 

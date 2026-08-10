@@ -31,13 +31,13 @@ export interface PoolInterface {
 
   /**
    * First token in the pair
-   * Concrete type depends on protocol (Erc20Token for EVM, SPL token for Solana, etc.)
+   * Concrete type depends on protocol (Erc20Token for EVM, etc.)
    */
   readonly token0: TokenInterface;
 
   /**
    * Second token in the pair
-   * Concrete type depends on protocol (Erc20Token for EVM, SPL token for Solana, etc.)
+   * Concrete type depends on protocol (Erc20Token for EVM, etc.)
    */
   readonly token1: TokenInterface;
 

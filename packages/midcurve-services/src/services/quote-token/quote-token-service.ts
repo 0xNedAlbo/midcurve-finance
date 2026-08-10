@@ -47,7 +47,6 @@ export abstract class QuoteTokenService {
    *
    * Protocol-specific implementation returns ordered list of token identifiers:
    * - EVM: Normalized addresses (0x...)
-   * - Solana: Mint addresses (base58)
    *
    * First match wins when matching against token pairs.
    *
@@ -60,7 +59,6 @@ export abstract class QuoteTokenService {
    *
    * Protocol-specific normalization:
    * - EVM: Convert to EIP-55 checksum address
-   * - Solana: Validate base58 format
    *
    * @param tokenId - Raw token identifier
    * @returns Normalized token identifier
@@ -73,7 +71,6 @@ export abstract class QuoteTokenService {
    *
    * Protocol-specific comparison (case-insensitive, normalized):
    * - EVM: Compare normalized addresses
-   * - Solana: Compare base58 strings
    *
    * @param tokenIdA - First token identifier
    * @param tokenIdB - Second token identifier
