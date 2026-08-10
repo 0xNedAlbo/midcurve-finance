@@ -1,6 +1,27 @@
 /**
  * Shared types for Midcurve Finance
  * Used across API, UI, and Workers
+ *
+ * ---------------------------------------------------------------------------
+ * ADDING A TYPE? IT MUST BE NAMED BELOW.
+ *
+ * This barrel re-exports every symbol individually — it is not `export *`. A
+ * new type therefore compiles fine inside @midcurve/shared, passes this
+ * package's own typecheck, and is still invisible to every consumer until it
+ * appears in one of the lists below.
+ *
+ * The symptom does not point here. Consumers fail with
+ *
+ *   TS2724: '"@midcurve/shared"' has no exported member named 'Foo'.
+ *           Did you mean 'FooBar'?
+ *
+ * which reads like a stale `dist/` — so the instinct is to rebuild the
+ * package, and rebuilding does nothing. The symbol is genuinely absent from
+ * the bundled `.d.ts`: tsup's dts bundler emits the declaration (it is
+ * reachable from an exported signature) but only *exports* what this file
+ * names, so grepping dist/index.d.ts finds the type and still nothing works.
+ * Grep the `export {` list at the end of that file instead.
+ * ---------------------------------------------------------------------------
  */
 
 // User types
