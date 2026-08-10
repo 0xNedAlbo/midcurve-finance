@@ -10,14 +10,15 @@ import {
   calculatePositionValue,
   tickToPrice,
   tickToSqrtRatioX96,
-  priceToTick,
+  priceToSqrtRatioX96,
+  pricePerToken0InToken1,
+  pricePerToken1InToken0,
   UniswapV3Pool,
   UniswapV3Position,
   CloseOrderSimulationOverlay,
 } from "@midcurve/shared";
 import type { PoolJSON } from "@midcurve/shared";
 import type { SwapConfig, SerializedCloseOrder } from "@midcurve/api-shared";
-import { TickMath } from "@uniswap/v3-sdk";
 
 /**
  * Position state interface - represents position at a specific price point
@@ -72,38 +73,39 @@ interface BasicPosition {
       config: { address: string };
       decimals: number;
     };
-    config: {
-      tickSpacing: number;
-    };
     state: {
       currentTick: number;
+      sqrtPriceX96: string;
     };
   };
 }
 
 /**
- * Calculate position state at a specific tick
+ * Calculate position state at a given sqrt price.
+ *
+ * The sqrt price is the input rather than a tick because a tick only ever
+ * approximates a price: it is the floor of the tick implied by sqrtPriceX96, so
+ * converting one back into the other loses everything below the tick boundary.
+ * Callers that genuinely have a tick (the range boundaries) convert once, here.
+ *
  * @param position - Position data
  * @param pnlBreakdown - PnL breakdown data (optional)
- * @param tick - Tick to calculate state at
- * @returns Position state at the specified tick
+ * @param sqrtPriceX96 - Sqrt price to calculate state at (Q96.96)
+ * @param poolPrice - The same price in quote token units, for display
+ * @param includeUnclaimedFees - Whether unclaimed fees count towards PnL, which
+ *   is true only for the position's current state
+ * @returns Position state at the specified price
  */
-function calculatePositionStateAtTick(
+function calculatePositionStateAtSqrtPrice(
   position: BasicPosition,
   pnlBreakdown: PnlBreakdown | null | undefined,
-  tick: number
+  sqrtPriceX96: bigint,
+  poolPrice: bigint,
+  includeUnclaimedFees: boolean
 ): PositionState {
-  const { pool } = position;
-  const baseToken = position.isToken0Quote ? pool.token1 : pool.token0;
-  const quoteToken = position.isToken0Quote ? pool.token0 : pool.token1;
-
-  const baseTokenConfig = baseToken.config as { address: string };
-  const quoteTokenConfig = quoteToken.config as { address: string };
-
   const liquidity = BigInt(position.state.liquidity);
-  const sqrtPriceX96 = BigInt(TickMath.getSqrtRatioAtTick(tick).toString());
 
-  // Calculate token amounts at this tick
+  // Calculate token amounts at this price
   const { token0Amount, token1Amount } = getTokenAmountsFromLiquidity(
     liquidity,
     sqrtPriceX96,
@@ -115,15 +117,7 @@ function calculatePositionStateAtTick(
   const baseTokenAmount = position.isToken0Quote ? token1Amount : token0Amount;
   const quoteTokenAmount = position.isToken0Quote ? token0Amount : token1Amount;
 
-  // Calculate price at this tick
-  const poolPrice = tickToPrice(
-    tick,
-    baseTokenConfig.address,
-    quoteTokenConfig.address,
-    Number(baseToken.decimals)
-  );
-
-  // Calculate position value at this tick
+  // Calculate position value at this price
   const baseIsToken0 = !position.isToken0Quote;
   const positionValue = calculatePositionValue(
     liquidity,
@@ -143,14 +137,14 @@ function calculatePositionStateAtTick(
   // unrealizedPnL = positionValue - costBasis
   const unrealizedPnL = positionValue - currentCostBasis;
 
-  // For current tick, use unclaimed fees; for other ticks, fees would be 0
-  const unclaimedFeesAtTick =
-    tick === position.pool.state.currentTick ? unclaimedFees : 0n;
+  // Unclaimed fees are only earned at the current price; at a hypothetical
+  // range boundary they have not accrued.
+  const applicableUnclaimedFees = includeUnclaimedFees ? unclaimedFees : 0n;
 
   // PnL Including Fees = realizedPnL + unrealizedPnL + unclaimedFees
   // Note: realizedPnL already includes collectedFees (fees are added to pnlAfter in the ledger)
   const pnlIncludingFees =
-    realizedPnL + unrealizedPnL + unclaimedFeesAtTick;
+    realizedPnL + unrealizedPnL + applicableUnclaimedFees;
 
   // PnL Excluding Fees = capital gains only (subtract fee portion from realizedPnL)
   const pnlExcludingFees = realizedPnL - collectedFees + unrealizedPnL;
@@ -163,6 +157,82 @@ function calculatePositionStateAtTick(
     pnlIncludingFees,
     pnlExcludingFees,
   };
+}
+
+/**
+ * Calculate position state at a range boundary tick.
+ *
+ * A boundary is defined by its tick, so converting that tick to a sqrt price is
+ * exact by definition — unlike the current price, which only ever passes through
+ * a tick by losing precision.
+ *
+ * @param position - Position data
+ * @param pnlBreakdown - PnL breakdown data (optional)
+ * @param tick - Tick to calculate state at
+ * @returns Position state at the specified tick
+ */
+function calculatePositionStateAtTick(
+  position: BasicPosition,
+  pnlBreakdown: PnlBreakdown | null | undefined,
+  tick: number
+): PositionState {
+  const { pool } = position;
+  const baseToken = position.isToken0Quote ? pool.token1 : pool.token0;
+  const quoteToken = position.isToken0Quote ? pool.token0 : pool.token1;
+
+  const baseTokenConfig = baseToken.config as { address: string };
+  const quoteTokenConfig = quoteToken.config as { address: string };
+
+  const poolPrice = tickToPrice(
+    tick,
+    baseTokenConfig.address,
+    quoteTokenConfig.address,
+    Number(baseToken.decimals)
+  );
+
+  return calculatePositionStateAtSqrtPrice(
+    position,
+    pnlBreakdown,
+    BigInt(tickToSqrtRatioX96(tick).toString()),
+    poolPrice,
+    false
+  );
+}
+
+/**
+ * Calculate the position's current state from the pool's exact sqrt price.
+ *
+ * Uses pool.state.sqrtPriceX96 rather than pool.state.currentTick: the tick is
+ * the floor of the tick implied by that sqrt price, so routing the current price
+ * through it discards the sub-tick remainder. On a live position that is worth
+ * up to ~0.1% of each leg, and it is what made the "Position Value" row disagree
+ * with the "Current Value" card computed by the backend from the same price.
+ *
+ * @param position - Position data
+ * @param pnlBreakdown - PnL breakdown data (optional)
+ * @returns Position state at the current pool price
+ */
+function calculateCurrentPositionState(
+  position: BasicPosition,
+  pnlBreakdown: PnlBreakdown | null | undefined
+): PositionState {
+  const { pool } = position;
+  const baseToken = position.isToken0Quote ? pool.token1 : pool.token0;
+  const sqrtPriceX96 = BigInt(pool.state.sqrtPriceX96);
+
+  // Price of one base token in quote units, from the same sqrt price the
+  // amounts are computed at — so the displayed price and amounts agree.
+  const poolPrice = position.isToken0Quote
+    ? pricePerToken1InToken0(sqrtPriceX96, Number(baseToken.decimals))
+    : pricePerToken0InToken1(sqrtPriceX96, Number(baseToken.decimals));
+
+  return calculatePositionStateAtSqrtPrice(
+    position,
+    pnlBreakdown,
+    sqrtPriceX96,
+    poolPrice,
+    true
+  );
 }
 
 /**
@@ -262,8 +332,6 @@ export function calculatePositionStates(
   pnlBreakdown: PnlBreakdown | null | undefined,
   activeCloseOrders?: SerializedCloseOrder[]
 ): PositionStates {
-  const currentTick = position.pool.state.currentTick;
-
   // When isToken0Quote = true, tick-to-price relationship is inverted:
   // - tickLower gives HIGHER price (more quote per base)
   // - tickUpper gives LOWER price (fewer quote per base)
@@ -276,7 +344,7 @@ export function calculatePositionStates(
     : position.config.tickUpper;
 
   // Current state is always raw (triggers haven't fired at current price)
-  const current = calculatePositionStateAtTick(position, pnlBreakdown, currentTick);
+  const current = calculateCurrentPositionState(position, pnlBreakdown);
 
   // Without close orders, use raw calculations for all states
   if (!activeCloseOrders?.length || !pnlBreakdown) {
@@ -470,7 +538,7 @@ export function calculateBreakEvenPrice(
   for (let i = 0; i < maxIterations; i++) {
     const midPrice = (lowPrice + highPrice) / 2n;
 
-    // Validate midPrice is valid before converting to tick
+    // Validate midPrice is valid before converting to a sqrt price
     if (midPrice <= 0n) {
       console.warn(
         "calculateBreakEvenPrice: Binary search reached invalid price"
@@ -478,17 +546,19 @@ export function calculateBreakEvenPrice(
       break;
     }
 
-    // Convert price to tick
-    const tick = priceToTick(
-      midPrice,
-      position.pool.config.tickSpacing,
-      baseTokenConfig.address,
-      quoteTokenConfig.address,
-      Number(baseToken.decimals)
+    // Convert price → sqrtPriceX96 DIRECTLY (continuous, no tick snapping).
+    // Going through priceToTick() would snap to tickSpacing, quantizing the
+    // search grid to 0.6% (spacing 60) or 0.1% (spacing 10): the bisection
+    // would then keep halving the interval while evaluating the same handful of
+    // distinct values. Same reasoning as UniswapV3Position.simulatePnLAtPrice().
+    const sqrtPriceX96 = BigInt(
+      priceToSqrtRatioX96(
+        baseTokenConfig.address,
+        quoteTokenConfig.address,
+        Number(baseToken.decimals),
+        midPrice
+      ).toString()
     );
-
-    // Calculate position value at this price
-    const sqrtPriceX96 = BigInt(TickMath.getSqrtRatioAtTick(tick).toString());
     const positionValue = calculatePositionValue(
       liquidity,
       sqrtPriceX96,
