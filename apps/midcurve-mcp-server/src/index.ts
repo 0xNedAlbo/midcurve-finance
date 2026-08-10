@@ -2,7 +2,7 @@
  * Midcurve MCP Server
  *
  * Read-only MCP server that exposes the user's midcurve portfolio (positions,
- * PnL, close orders, pools, notifications) to Claude. Authenticates against
+ * PnL, close orders, pools) to Claude. Authenticates against
  * the midcurve REST API with a long-lived API key.
  *
  * Transport: stdio (Claude Desktop / Claude Code launch this binary as a
@@ -29,7 +29,6 @@ import { buildConvertPriceAndTickTool } from './tools/convert-price-and-tick.js'
 import { buildListCloseOrdersTool } from './tools/list-close-orders.js';
 import { buildGetPoolTool } from './tools/get-pool.js';
 import { buildSearchPoolsTool } from './tools/search-pools.js';
-import { buildListNotificationsTool } from './tools/list-notifications.js';
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -61,6 +60,8 @@ async function main(): Promise<void> {
 
   const server = new McpServer({ name: 'midcurve', version: '0.1.0' });
 
+  let registeredTools = 0;
+
   function register<T extends { name: string; config: unknown; handler: (args: never) => Promise<unknown> }>(
     tool: T
   ): void {
@@ -83,6 +84,7 @@ async function main(): Promise<void> {
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     server.registerTool(tool.name, tool.config as any, wrapped as any);
+    registeredTools++;
   }
 
   register(buildGetUserTool(client));
@@ -99,9 +101,8 @@ async function main(): Promise<void> {
   register(buildListCloseOrdersTool(client));
   register(buildGetPoolTool(client));
   register(buildSearchPoolsTool(client));
-  register(buildListNotificationsTool(client));
 
-  log.info({ count: 17 }, 'tools registered');
+  log.info({ count: registeredTools }, 'tools registered');
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

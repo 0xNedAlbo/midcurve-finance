@@ -52,7 +52,7 @@ the consumer can reconstruct the exact value without precision loss.
 A **display sidecar** is a humanized field emitted alongside a *different*
 canonical field for narration convenience, without a `*Raw` companion of its
 own. The canonical field remains the single source of truth; the sidecar is
-derived at format time. Example: a notification carrying
+derived at format time. Example: a payload carrying
 `currentSqrtPriceX96` may include a humanized `currentPrice` next to it.
 Consumers needing exact arithmetic derive from the canonical field, not by
 parsing the sidecar. This is distinct from dual-emit — sidecars are
@@ -200,11 +200,6 @@ exhaustive — any new scaled numeric joins this convention):
   USD float string the subgraph returned. This is a case where the raw form is
   itself a float string — still canonical because the subgraph delivers it that
   way and there is no precision loss in passing it through unmodified.
-- **Notification payloads** (`list_notifications`): per-event-type. Range
-  events single-emit `currentSqrtPriceX96` as the canonical form (the
-  humanized prices alongside it are display-only — see §2). Execution-success
-  events dual-emit `amount0Out`/`amount0OutRaw`, `amount1Out`/`amount1OutRaw`
-  (each scaled to its individual token's decimals).
 
 ### 3.3 `priceRange`
 
@@ -469,7 +464,7 @@ expect("sqrtPriceX96Raw"  in detail.rawState ).toBe(false);
 ## 10. Future tools — adoption checklist
 
 When adding a new MCP tool that emits position-level or pool-level data
-(`list_close_orders`, `list_notifications`, `generate_position_pnl_curve`, future
+(`list_close_orders`, `generate_position_pnl_curve`, future
 yield/swap/order tools, etc.), the formatter must:
 
 - [ ] Embed the `pool` object (§3.1) on any item that references a pool, even if

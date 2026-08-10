@@ -12,7 +12,6 @@ import {
   CloseOrderMonitor,
   type CloseOrderMonitorStatus,
 } from './uniswapv3/uniswapv3-close-order-monitor';
-import { RangeMonitor, type RangeMonitorStatus } from './range-monitor';
 import {
   OutboxPublisher,
   setupDomainEventsTopology,
@@ -35,7 +34,6 @@ export interface WorkerManagerStatus {
     closeOrderMonitor: CloseOrderMonitorStatus;
     orderExecutor: CloseOrderExecutorStatus;
     outboxPublisher: OutboxPublisherStatus;
-    rangeMonitor: RangeMonitorStatus;
   };
 }
 
@@ -50,7 +48,6 @@ class WorkerManager {
   private closeOrderMonitor: CloseOrderMonitor | null = null;
   private orderExecutor: CloseOrderExecutor | null = null;
   private outboxPublisher: OutboxPublisher | null = null;
-  private rangeMonitor: RangeMonitor | null = null;
 
   /**
    * Start all workers
@@ -95,10 +92,6 @@ class WorkerManager {
       this.closeOrderMonitor = new CloseOrderMonitor();
       startPromises.push(this.closeOrderMonitor.start());
 
-      // Start RangeMonitor (monitors all positions for range changes)
-      this.rangeMonitor = new RangeMonitor();
-      startPromises.push(this.rangeMonitor.start());
-
       // Start all workers in parallel
       await Promise.all(startPromises);
 
@@ -135,7 +128,6 @@ class WorkerManager {
       await Promise.all([
         this.closeOrderMonitor?.stop(),
         this.orderExecutor?.stop(),
-        this.rangeMonitor?.stop(),
       ]);
 
       // Stop outbox publisher (synchronous)
@@ -180,15 +172,6 @@ class WorkerManager {
         },
         outboxPublisher: {
           running: this.outboxPublisher?.isRunning() ?? false,
-        },
-        rangeMonitor: this.rangeMonitor?.getStatus() || {
-          status: 'idle',
-          poolSubscribers: 0,
-          positionsTracked: 0,
-          eventsProcessed: 0,
-          rangeChangesDetected: 0,
-          lastEventAt: null,
-          lastSyncAt: null,
         },
       },
     };
@@ -252,4 +235,3 @@ export async function stopWorkers(): Promise<void> {
 // Re-export types
 export { CloseOrderMonitor, type CloseOrderMonitorStatus };
 export { CloseOrderExecutor, type CloseOrderExecutorStatus };
-export { RangeMonitor, type RangeMonitorStatus };

@@ -113,11 +113,6 @@ export type {
   ListAutomationLogsOptions,
 } from './automation/index.js';
 
-// Notification input types
-export type {
-  UpdateWebhookConfigInput,
-} from './notifications/index.js';
-
 // User settings input types
 export type {
   UpdateUserSettingsInput,

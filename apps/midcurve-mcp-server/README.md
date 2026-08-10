@@ -17,7 +17,6 @@ Sixteen tools, all read-only.
 | `get_position` | Detail of a single position (UniswapV3 NFT or vault). |
 | `list_close_orders` | Stop-loss / take-profit orders attached to a position. |
 | `get_pool` | UniswapV3 pool state + subgraph metrics. |
-| `list_notifications` | Range alerts and order-execution notifications. |
 
 **Per-position deep-dive**
 
