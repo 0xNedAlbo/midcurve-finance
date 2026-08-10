@@ -188,6 +188,45 @@ export interface RefreshCloseOrdersResult {
   deleted: number;
 }
 
+/**
+ * One trigger slot as read from the closer contract.
+ * `onChain` is null when the contract reports no order in that slot.
+ */
+export interface CloseOrderChainSlot {
+  triggerMode: ContractTriggerMode;
+  onChain: OnChainOrder | null;
+  orderIdentityHash: string;
+}
+
+/**
+ * Everything {@link UniswapV3CloseOrderService.reconcileChainSnapshot} needs to
+ * write, read once by {@link UniswapV3CloseOrderService.fetchChainSnapshot}.
+ *
+ * Exists so the RPC reads can happen before a write transaction is opened
+ * rather than inside it.
+ */
+export interface CloseOrderChainSnapshot {
+  positionId: string;
+  /** 'uniswapv3' (NFT) or 'uniswapv3-vault' (vault shares) */
+  protocol: string;
+  chainId: number;
+  isVault: boolean;
+  /** Closer contract the slots were read from */
+  contractAddress: string;
+  /** NFT positions only */
+  nftId?: string;
+  /** Vault positions only */
+  vaultAddress?: string;
+  /** Vault positions only */
+  ownerAddress?: string;
+  /** Whether an operator key is configured at all */
+  hasOperator: boolean;
+  /** Our operator address, or null when unconfigured */
+  ourOperatorAddress: string | null;
+  /** One entry per trigger mode (LOWER, UPPER) */
+  slots: CloseOrderChainSlot[];
+}
+
 // ============================================================================
 // Service
 // ============================================================================
@@ -229,79 +268,78 @@ export class UniswapV3CloseOrderService {
   }
 
   /**
-   * Refresh all close orders for a position from on-chain data.
+   * Read the on-chain close-order state for a position, without writing anything.
    *
-   * Reads the PositionCloser contract for both trigger modes (LOWER, UPPER)
-   * and reconciles DB state:
-   * - Creates missing orders (exist on-chain but not in DB)
-   * - Updates existing orders (syncs on-chain state, adjusts automationState)
-   * - Deletes stale orders (no longer active on-chain)
+   * This is the network half of {@link refresh}. It is public so that callers
+   * running their own write transaction can do the RPC round-trips *before*
+   * opening it, then pass the result to {@link reconcileChainSnapshot}. Holding
+   * a transaction open across these reads is what made position refresh exceed
+   * Prisma's interactive-transaction timeout.
    *
-   * @param positionId - Position ID to reconcile close orders for
+   * @param positionId - Position ID to read close orders for
    * @param blockNumber - Block number to read state at, or 'latest'
-   * @param tx - Optional Prisma transaction client
+   * @param tx - Transaction to run the *locating* reads in (position, operator
+   *   config, closer contract). Pass this only when a transaction is already
+   *   open and may hold rows this needs to see — the position row created
+   *   earlier in the same transaction, for instance. Callers doing the
+   *   fetch-then-write split leave it unset, which is the whole point: nothing
+   *   is open while the RPC reads below run.
    */
-  async refresh(
+  async fetchChainSnapshot(
     positionId: string,
     blockNumber: number | 'latest' = 'latest',
     tx?: PrismaTransactionClient,
-  ): Promise<RefreshCloseOrdersResult> {
-    log.methodEntry(this.logger, 'refresh', { positionId, blockNumber });
+  ): Promise<CloseOrderChainSnapshot> {
+    log.methodEntry(this.logger, 'fetchChainSnapshot', { positionId, blockNumber });
 
-    try {
-      const db = tx ?? this.prisma;
+    const db = tx ?? this.prisma;
 
-      // 1. Fetch position to determine protocol and extract identifiers
-      const position = await db.position.findUnique({ where: { id: positionId } });
-      if (!position) {
-        throw new Error(`Position not found: ${positionId}`);
-      }
-      const posConfig = position.config as Record<string, unknown>;
-      const chainId = posConfig.chainId as number;
-      const protocol = position.protocol; // 'uniswapv3' or 'uniswapv3-vault'
-      const isVault = protocol === 'uniswapv3-vault';
+    // 1. Fetch position to determine protocol and extract identifiers
+    const position = await db.position.findUnique({ where: { id: positionId } });
+    if (!position) {
+      throw new Error(`Position not found: ${positionId}`);
+    }
+    const posConfig = position.config as Record<string, unknown>;
+    const chainId = posConfig.chainId as number;
+    const protocol = position.protocol; // 'uniswapv3' or 'uniswapv3-vault'
+    const isVault = protocol === 'uniswapv3-vault';
 
-      // Protocol-specific identifiers
-      const nftId = isVault ? undefined : String(posConfig.nftId);
-      const vaultAddress = isVault ? (posConfig.vaultAddress as string) : undefined;
-      const ownerAddress = isVault ? (posConfig.ownerAddress as string) : undefined;
+    // Protocol-specific identifiers
+    const nftId = isVault ? undefined : String(posConfig.nftId);
+    const vaultAddress = isVault ? (posConfig.vaultAddress as string) : undefined;
+    const ownerAddress = isVault ? (posConfig.ownerAddress as string) : undefined;
 
-      if (isVault && (!vaultAddress || !ownerAddress)) {
-        throw new Error(`Vault position missing vaultAddress or ownerAddress: ${positionId}`);
-      }
-      if (!isVault && !nftId) {
-        throw new Error(`NFT position missing nftId: ${positionId}`);
-      }
+    if (isVault && (!vaultAddress || !ownerAddress)) {
+      throw new Error(`Vault position missing vaultAddress or ownerAddress: ${positionId}`);
+    }
+    if (!isVault && !nftId) {
+      throw new Error(`NFT position missing nftId: ${positionId}`);
+    }
 
-      // 2. Look up operator key + address from system config (single operator key)
-      const operatorKeyId = await db.systemConfig.findUnique({ where: { key: 'operator.kms.keyId' } });
-      const operatorAddressEntry = await db.systemConfig.findUnique({ where: { key: 'operator.address' } });
-      const hasOperator = operatorKeyId !== null;
-      const ourOperatorAddress = operatorAddressEntry?.value ?? null;
+    // 2. Look up operator key + address from system config (single operator key)
+    const operatorKeyId = await db.systemConfig.findUnique({ where: { key: 'operator.kms.keyId' } });
+    const operatorAddressEntry = await db.systemConfig.findUnique({ where: { key: 'operator.address' } });
+    const hasOperator = operatorKeyId !== null;
+    const ourOperatorAddress = operatorAddressEntry?.value ?? null;
 
-      // 3. Find the closer contract for this chain (protocol-specific)
-      const contractName = isVault ? 'UniswapV3VaultPositionCloser' : 'UniswapV3PositionCloser';
-      const sharedContract = await this.sharedContractService.findLatestByChainAndName(
-        chainId,
-        contractName,
+    // 3. Find the closer contract for this chain (protocol-specific)
+    const contractName = isVault ? 'UniswapV3VaultPositionCloser' : 'UniswapV3PositionCloser';
+    const sharedContract = await this.sharedContractService.findLatestByChainAndName(
+      chainId,
+      contractName,
+    );
+    if (!sharedContract) {
+      throw new Error(
+        `No ${contractName} contract found for chain ${chainId}`,
       );
-      if (!sharedContract) {
-        throw new Error(
-          `No ${contractName} contract found for chain ${chainId}`,
-        );
-      }
-      const contractAddress = sharedContract.config.address;
+    }
+    const contractAddress = sharedContract.config.address;
 
-      // 4. Read on-chain orders and reconcile with DB for both trigger modes
-      const orders: CloseOrder[] = [];
-      let created = 0;
-      let updated = 0;
-      let deleted = 0;
+    // 4. Read both trigger modes from the chain, in parallel
+    const triggerModes = [ContractTriggerMode.LOWER, ContractTriggerMode.UPPER] as const;
 
-      const triggerModes = [ContractTriggerMode.LOWER, ContractTriggerMode.UPPER] as const;
-
-      for (const triggerMode of triggerModes) {
-        // Read on-chain order using protocol-specific ABI
+    const slots = await Promise.all(
+      triggerModes.map(async (triggerMode) => {
         const onChain = isVault
           ? await this.readVaultOnChainOrder(
               chainId, contractAddress, vaultAddress!, ownerAddress!, triggerMode, blockNumber,
@@ -326,6 +364,58 @@ export class UniswapV3CloseOrderService {
               nftId: nftId!,
               triggerMode,
             });
+
+        return { triggerMode, onChain, orderIdentityHash };
+      }),
+    );
+
+    log.methodExit(this.logger, 'fetchChainSnapshot', { positionId });
+
+    return {
+      positionId,
+      protocol,
+      chainId,
+      isVault,
+      contractAddress,
+      nftId,
+      vaultAddress,
+      ownerAddress,
+      hasOperator,
+      ourOperatorAddress,
+      slots,
+    };
+  }
+
+  /**
+   * Reconcile DB close-order rows against an already-read chain snapshot.
+   *
+   * This is the write half of {@link refresh} — pure database work, safe to run
+   * inside a caller's transaction:
+   * - Creates missing orders (exist on-chain but not in DB)
+   * - Updates existing orders (syncs on-chain state, adjusts automationState)
+   * - Deletes stale orders (no longer active on-chain)
+   *
+   * @param snapshot - Chain state from {@link fetchChainSnapshot}
+   * @param tx - Optional Prisma transaction client
+   */
+  async reconcileChainSnapshot(
+    snapshot: CloseOrderChainSnapshot,
+    tx?: PrismaTransactionClient,
+  ): Promise<RefreshCloseOrdersResult> {
+    const { positionId, protocol, chainId, isVault, contractAddress, nftId } = snapshot;
+    const { vaultAddress, ownerAddress, hasOperator, ourOperatorAddress } = snapshot;
+
+    log.methodEntry(this.logger, 'reconcileChainSnapshot', { positionId });
+
+    try {
+      const db = tx ?? this.prisma;
+
+      const orders: CloseOrder[] = [];
+      let created = 0;
+      let updated = 0;
+      let deleted = 0;
+
+      for (const { triggerMode, onChain, orderIdentityHash } of snapshot.slots) {
         const existingOrder = await this.findByOrderIdentityHash(orderIdentityHash, tx);
         const isActive = onChain !== null && onChain.status === OnChainOrderStatus.ACTIVE;
 
@@ -440,12 +530,38 @@ export class UniswapV3CloseOrderService {
         { positionId, created, updated, deleted },
         'Close order refresh complete',
       );
-      log.methodExit(this.logger, 'refresh', { created, updated, deleted });
+      log.methodExit(this.logger, 'reconcileChainSnapshot', { created, updated, deleted });
       return { orders, created, updated, deleted };
     } catch (error) {
-      log.methodError(this.logger, 'refresh', error as Error, { positionId });
+      log.methodError(this.logger, 'reconcileChainSnapshot', error as Error, { positionId });
       throw error;
     }
+  }
+
+  /**
+   * Refresh all close orders for a position from on-chain data.
+   *
+   * Reads the PositionCloser contract for both trigger modes (LOWER, UPPER)
+   * and reconciles DB state.
+   *
+   * Convenience composition of {@link fetchChainSnapshot} and
+   * {@link reconcileChainSnapshot}. Callers that hold — or are about to open —
+   * a write transaction should call those two directly instead, so the RPC
+   * reads happen outside the transaction.
+   *
+   * @param positionId - Position ID to reconcile close orders for
+   * @param blockNumber - Block number to read state at, or 'latest'
+   * @param tx - Optional Prisma transaction client
+   */
+  async refresh(
+    positionId: string,
+    blockNumber: number | 'latest' = 'latest',
+    tx?: PrismaTransactionClient,
+  ): Promise<RefreshCloseOrdersResult> {
+    // `tx` is threaded into the fetch as well so this keeps reading its own
+    // caller's uncommitted writes, exactly as it did before the split.
+    const snapshot = await this.fetchChainSnapshot(positionId, blockNumber, tx);
+    return this.reconcileChainSnapshot(snapshot, tx);
   }
 
   // ==========================================================================
