@@ -9,46 +9,9 @@
 import type {
   UniswapV3PositionConfigResponse,
   UniswapV3PositionStateResponse,
-  UniswapV3PoolConfigResponse,
-  UniswapV3PoolStateResponse,
-  Erc20TokenConfigResponse,
 } from './response-types.js';
 
-/**
- * Erc20Token as it appears in API responses.
- */
-/**
- * Token type matching @midcurve/shared TokenType
- */
-export type TokenTypeResponse = 'erc20' | 'basic-currency';
-
-export interface Erc20TokenResponse {
-  id: string;
-  tokenType: TokenTypeResponse;
-  name: string;
-  symbol: string;
-  decimals: number;
-  logoUrl?: string;
-  marketCap?: number;
-  config: Erc20TokenConfigResponse;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * UniswapV3Pool as it appears in API responses.
- */
-export interface UniswapV3PoolResponse {
-  id: string;
-  protocol: 'uniswapv3';
-  token0: Erc20TokenResponse;
-  token1: Erc20TokenResponse;
-  feeBps: number;
-  config: UniswapV3PoolConfigResponse;
-  state: UniswapV3PoolStateResponse;
-  createdAt: string;
-  updatedAt: string;
-}
+import type { UniswapV3PoolWire } from '../../pools/uniswapv3.js';
 
 /**
  * Complete UniswapV3 Position for API responses.
@@ -67,7 +30,11 @@ export interface UniswapV3PositionResponse {
   type: string;
 
   // Pool reference
-  pool: UniswapV3PoolResponse;
+  //
+  // The same wire shape the pool endpoints return, not a parallel description of
+  // it: `serializeUniswapV3Position` nests `serializeUniswapV3Pool`, so these are
+  // the same bytes. A second declaration here would drift from that one.
+  pool: UniswapV3PoolWire;
   isToken0Quote: boolean;
 
   // PnL fields (bigint -> string)

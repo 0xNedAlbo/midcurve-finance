@@ -36,34 +36,9 @@ export interface UniswapV3PositionStateResponse {
   isOwnedByUser: boolean;
 }
 
-/**
- * UniswapV3 Pool Config as it appears in API responses.
- */
-export interface UniswapV3PoolConfigResponse {
-  chainId: number;
-  address: string;
-  token0: string;
-  token1: string;
-  feeBps: number;
-  tickSpacing: number;
-}
-
-/**
- * UniswapV3 Pool State as it appears in API responses.
- * All bigint fields converted to strings.
- */
-export interface UniswapV3PoolStateResponse {
-  sqrtPriceX96: string;
-  currentTick: number;
-  liquidity: string;
-  feeGrowthGlobal0: string;
-  feeGrowthGlobal1: string;
-}
-
-/**
- * ERC20 Token Config as it appears in API responses.
- */
-export interface Erc20TokenConfigResponse {
-  address: string;
-  chainId: number;
-}
+// The pool's config, state and token shapes are NOT redeclared here. They are
+// the serialized shapes of the UniswapV3Pool / Erc20Token classes, so they live
+// beside those classes in @midcurve/shared (UniswapV3PoolConfigJSON,
+// UniswapV3PoolStateJSON, Erc20TokenConfigJSON) and reach API consumers via
+// UniswapV3PoolWire. Field-identical copies here drifted from the serializer
+// once already — see issue #57.

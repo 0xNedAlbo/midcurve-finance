@@ -11,7 +11,7 @@ import type {
   UniswapV3VaultPositionStateResponse,
 } from './response-types.js';
 
-import type { UniswapV3PoolResponse } from '../uniswapv3/typed-response.js';
+import type { UniswapV3PoolWire } from '../../pools/uniswapv3.js';
 
 /**
  * Complete UniswapV3 Vault Position for API responses.
@@ -30,7 +30,7 @@ export interface UniswapV3VaultPositionResponse {
   type: string;
 
   // Pool reference (same underlying Uniswap V3 pool)
-  pool: UniswapV3PoolResponse;
+  pool: UniswapV3PoolWire;
   isToken0Quote: boolean;
 
   // PnL fields (bigint -> string)
