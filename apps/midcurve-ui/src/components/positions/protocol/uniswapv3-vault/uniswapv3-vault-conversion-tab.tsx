@@ -6,7 +6,6 @@ import type { UniswapV3VaultPositionData } from "@/hooks/positions/uniswapv3-vau
 import type {
   UniswapV3VaultPositionConfigResponse,
   UniswapV3VaultPositionStateResponse,
-  UniswapV3PoolStateResponse,
 } from "@midcurve/api-shared";
 import { ConversionSummary } from "../uniswapv3/conversion-summary";
 import { useUniswapV3VaultConversion } from "@/hooks/positions/uniswapv3-vault/useUniswapV3VaultConversion";
@@ -32,7 +31,7 @@ export function UniswapV3VaultConversionTab({ position }: UniswapV3VaultConversi
     if (!summary) return null;
 
     const state = position.state as UniswapV3VaultPositionStateResponse;
-    const poolState = position.pool.state as UniswapV3PoolStateResponse;
+    const poolState = position.pool.state;
 
     const totalSupply = BigInt(state.totalSupply);
     const userLiquidity =

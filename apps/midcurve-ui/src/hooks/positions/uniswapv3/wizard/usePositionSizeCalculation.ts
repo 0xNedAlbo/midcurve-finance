@@ -6,7 +6,7 @@
  */
 
 import { useMemo } from 'react';
-import type { UniswapV3PoolResponse, Erc20TokenResponse } from '@midcurve/api-shared';
+import type { UniswapV3PoolWire, Erc20TokenWire } from '@midcurve/api-shared';
 import {
   getLiquidityFromInvestmentAmounts_withTick,
   getTokenAmountsFromLiquidity,
@@ -16,9 +16,9 @@ import {
 interface PositionSizeCalculationParams {
   baseAmount: bigint;
   quoteAmount: bigint;
-  baseToken: Erc20TokenResponse;
-  quoteToken: Erc20TokenResponse;
-  pool: UniswapV3PoolResponse;
+  baseToken: Erc20TokenWire;
+  quoteToken: Erc20TokenWire;
+  pool: UniswapV3PoolWire;
   tickLower: number;
   tickUpper: number;
 }

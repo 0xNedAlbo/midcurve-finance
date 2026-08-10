@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { UniswapV3Pool, type PoolJSON } from '@midcurve/shared';
+import { UniswapV3Pool } from '@midcurve/shared';
 import type { PoolSearchResultItem } from '@midcurve/api-shared';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import type { CreatePositionWizardState, ConfigurationTab } from '../context/CreatePositionWizardContext';
@@ -95,7 +95,7 @@ export function useWizardUrlState({
         address: params.poolAddress,
       })
       .then((result) => {
-        const poolInstance = UniswapV3Pool.fromJSON(result.pool as unknown as PoolJSON);
+        const poolInstance = UniswapV3Pool.fromWire(result.pool);
 
         // Create minimal PoolSearchResultItem for selectPool
         const poolSearchItem: PoolSearchResultItem = {

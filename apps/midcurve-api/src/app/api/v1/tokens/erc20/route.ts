@@ -95,6 +95,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         logoUrl: token.logoUrl,
         coingeckoId: token.coingeckoId,
         marketCap: token.marketCap,
+        tokenHash: token.tokenHash,
         config: token.config,
         createdAt: token.createdAt.toISOString(),
         updatedAt: token.updatedAt.toISOString(),

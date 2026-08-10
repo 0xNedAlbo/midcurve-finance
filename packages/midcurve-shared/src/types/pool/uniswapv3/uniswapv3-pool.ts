@@ -5,7 +5,11 @@
  * Extends BasePool with Uniswap V3 specific configuration and state.
  */
 
-import { Erc20Token, type Erc20TokenRow } from '../../token/index.js';
+import {
+  Erc20Token,
+  type Erc20TokenJSON,
+  type Erc20TokenRow,
+} from '../../token/index.js';
 import { BasePool } from '../base-pool.js';
 import type { Protocol, BasePoolParams, PoolRow, PoolJSON } from '../pool.types.js';
 import {
@@ -41,6 +45,39 @@ export interface UniswapV3PoolParams extends BasePoolParams {
  */
 export interface UniswapV3PoolRow extends PoolRow {
   protocol: 'uniswapv3';
+}
+
+// ============================================================================
+// JSON SERIALIZATION
+// ============================================================================
+
+/**
+ * Serialized shape of a UniswapV3Pool as it travels over JSON.
+ *
+ * The concrete counterpart to {@link PoolJSON}: `protocol` is narrowed to this
+ * pool's discriminator, `config`/`state` are the real Uniswap V3 shapes instead
+ * of `Record<string, unknown>`, tokens are `Erc20TokenJSON`, and `feeBps` — which
+ * {@link UniswapV3Pool.toJSON} emits but the base `PoolJSON` does not declare —
+ * is present.
+ *
+ * `PoolJSON` stays loose on purpose: it describes *any* pool, so it can express
+ * none of the above. That is what forces a cast when a concrete wire payload is
+ * deserialized through it.
+ *
+ * Lives here rather than in `@midcurve/api-shared` because a class's serialized
+ * shape is a fact about the class, not about the transport that happens to carry
+ * it. `@midcurve/api-shared` re-exports it as `UniswapV3PoolWire`.
+ *
+ * @see UniswapV3Pool.fromWire
+ */
+export interface UniswapV3PoolJSON
+  extends Omit<PoolJSON, 'protocol' | 'token0' | 'token1' | 'config' | 'state'> {
+  protocol: 'uniswapv3';
+  token0: Erc20TokenJSON;
+  token1: Erc20TokenJSON;
+  feeBps: number;
+  config: UniswapV3PoolConfigJSON;
+  state: UniswapV3PoolStateJSON;
 }
 
 // ============================================================================
@@ -285,6 +322,44 @@ export class UniswapV3Pool extends BasePool {
       token1: Erc20Token.fromJSON(json.token1),
       config: UniswapV3PoolConfig.fromJSON(json.config as unknown as UniswapV3PoolConfigJSON),
       state: stateFromJSON(json.state as unknown as UniswapV3PoolStateJSON),
+      createdAt: new Date(json.createdAt),
+      updatedAt: new Date(json.updatedAt),
+    });
+  }
+
+  /**
+   * Create UniswapV3Pool from its wire shape (API response).
+   *
+   * The typed door that {@link UniswapV3Pool.fromJSON} cannot be:
+   * `UniswapV3PoolJSON` names the concrete config, state and token shapes, so
+   * nothing here needs a cast. Prefer this over `fromJSON` whenever the payload
+   * came from `apiClient` or another JSON boundary and is known to be a Uniswap
+   * V3 pool; `fromJSON` remains for the polymorphic path through `PoolFactory`.
+   *
+   * @param json - Wire payload, as produced by `serializeUniswapV3Pool`
+   * @returns UniswapV3Pool instance
+   * @throws Error if protocol is not 'uniswapv3'
+   *
+   * @example
+   * ```typescript
+   * const { pool } = await discoverPool.mutateAsync({ chainId, address });
+   * const instance = UniswapV3Pool.fromWire(pool);
+   * console.log(instance.sqrtPriceX96); // bigint value
+   * ```
+   */
+  static fromWire(json: UniswapV3PoolJSON): UniswapV3Pool {
+    // Statically dead given the literal type, but this is a JSON boundary —
+    // the type is a claim about the payload, not a guarantee.
+    if (json.protocol !== 'uniswapv3') {
+      throw new Error(`Expected protocol 'uniswapv3', got '${json.protocol}'`);
+    }
+
+    return new UniswapV3Pool({
+      id: json.id,
+      token0: Erc20Token.fromWire(json.token0),
+      token1: Erc20Token.fromWire(json.token1),
+      config: UniswapV3PoolConfig.fromJSON(json.config),
+      state: stateFromJSON(json.state),
       createdAt: new Date(json.createdAt),
       updatedAt: new Date(json.updatedAt),
     });

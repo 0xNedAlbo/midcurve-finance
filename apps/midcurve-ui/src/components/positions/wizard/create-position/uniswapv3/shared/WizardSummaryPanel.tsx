@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { PlusCircle, MinusCircle, ArrowLeftRight, RefreshCw } from 'lucide-react';
-import { compareAddresses, formatCompactValue, UniswapV3Pool, type PoolJSON } from '@midcurve/shared';
+import { compareAddresses, formatCompactValue, UniswapV3Pool } from '@midcurve/shared';
 import { useCreatePositionWizard } from '../context/CreatePositionWizardContext';
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { StepNavigationButtons } from './StepNavigationButtons';
@@ -53,7 +53,7 @@ export function WizardSummaryPanel({
     try {
       const result = await discoverPool.mutateAsync({ chainId, address });
       // Deserialize JSON to class instance for proper method access
-      const poolInstance = UniswapV3Pool.fromJSON(result.pool as unknown as PoolJSON);
+      const poolInstance = UniswapV3Pool.fromWire(result.pool);
       setDiscoveredPool(poolInstance);
     } catch (error) {
       // Silently fail - pool stays at current state

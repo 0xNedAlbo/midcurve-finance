@@ -1,6 +1,6 @@
 "use client";
 
-import type { Erc20TokenResponse } from "@midcurve/api-shared";
+import type { Erc20TokenWire } from "@midcurve/api-shared";
 import { formatCompactValue } from "@/lib/fraction-format";
 import { formatPercentage } from "@/lib/format-helpers";
 
@@ -10,7 +10,7 @@ interface PnLCurveTooltipProps {
   pnl: bigint;
   pnlPercent: number;
   quoteDecimals: number;
-  quoteToken: Erc20TokenResponse;
+  quoteToken: Erc20TokenWire;
 }
 
 export function PnLCurveTooltip({

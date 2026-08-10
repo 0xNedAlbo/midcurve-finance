@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Search, Star, Hash, PlusCircle, MinusCircle } from 'lucide-react';
 import type { PoolSearchResultItem, FavoritePoolItem } from '@midcurve/api-shared';
-import { UniswapV3Pool, type PoolJSON } from '@midcurve/shared';
+import { UniswapV3Pool } from '@midcurve/shared';
 import {
   useCreatePositionWizard,
   type PoolSelectionTab,
@@ -226,7 +226,7 @@ export function PoolSelectionStep() {
           }),
         });
         // Deserialize JSON to class instance for proper method access
-        const poolInstance = UniswapV3Pool.fromJSON(result.pool as unknown as PoolJSON);
+        const poolInstance = UniswapV3Pool.fromWire(result.pool);
         setDiscoveredPool(poolInstance);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to discover pool';

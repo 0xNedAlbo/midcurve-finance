@@ -17,11 +17,11 @@ import {
   valueOfToken0AmountInToken1,
   valueOfToken1AmountInToken0,
 } from "@midcurve/shared";
+import type { UniswapV3PoolStateJSON } from "@midcurve/shared";
 import type { UniswapV3PositionData } from "./useUniswapV3Position";
 import type {
   UniswapV3PositionConfigResponse,
   UniswapV3PositionStateResponse,
-  UniswapV3PoolStateResponse,
 } from "@midcurve/api-shared";
 import { useWatchUniswapV3PoolPrice } from "@/hooks/pools/useWatchUniswapV3PoolPrice";
 
@@ -78,8 +78,8 @@ export function useUniswapV3LiveMetrics(
     }
 
     // Patch live values into position structure
-    const livePoolState: UniswapV3PoolStateResponse = {
-      ...(position.pool.state as UniswapV3PoolStateResponse),
+    const livePoolState: UniswapV3PoolStateJSON = {
+      ...position.pool.state,
       sqrtPriceX96: sqrtPriceX96BigInt.toString(),
       currentTick,
     };
