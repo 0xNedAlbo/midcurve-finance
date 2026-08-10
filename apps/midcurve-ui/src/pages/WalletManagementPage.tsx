@@ -2,43 +2,22 @@
  * Wallet Management Page
  *
  * Full-page view for managing user wallet perimeter.
- * Supports wallet-type tabs (EVM now, Solana/Bitcoin future).
+ * EVM is the only supported wallet platform.
  */
 
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../providers/AuthProvider';
 import { EvmWalletTab } from '../components/wallets';
 import { queryKeys } from '../lib/query-keys';
 import { ArrowLeft, Wallet, RefreshCw } from 'lucide-react';
 
-type WalletTab = 'evm' | 'solana' | 'bitcoin';
-
-const TABS: { id: WalletTab; label: string; enabled: boolean }[] = [
-  { id: 'evm', label: 'EVM', enabled: true },
-  { id: 'solana', label: 'Solana', enabled: false },
-  { id: 'bitcoin', label: 'Bitcoin', enabled: false },
-];
-
 export function WalletManagementPage() {
   const { user, status } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Read tab from URL, default to 'evm'
-  const rawTab = searchParams.get('tab');
-  const activeTab: WalletTab = (
-    rawTab === 'solana' || rawTab === 'bitcoin' ? rawTab : 'evm'
-  );
-
-  const handleTabChange = (tab: WalletTab) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('tab', tab);
-    setSearchParams(params);
-  };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -104,41 +83,7 @@ export function WalletManagementPage() {
 
       {/* Content */}
       <div className="max-w-4xl mx-auto px-4 py-8">
-        {/* Wallet Type Tabs */}
-        <div className="flex border-b border-slate-700/50 mb-6">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => tab.enabled && handleTabChange(tab.id)}
-              disabled={!tab.enabled}
-              className={`px-4 py-3 font-medium transition-colors ${
-                activeTab === tab.id
-                  ? 'text-blue-400 border-b-2 border-blue-400 -mb-px cursor-pointer'
-                  : tab.enabled
-                    ? 'text-slate-400 hover:text-slate-200 cursor-pointer'
-                    : 'text-slate-600 cursor-not-allowed'
-              }`}
-            >
-              {tab.label}
-              {!tab.enabled && (
-                <span className="text-xs text-slate-600 ml-1">(Soon)</span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab Content */}
-        {activeTab === 'evm' && <EvmWalletTab />}
-        {activeTab === 'solana' && (
-          <div className="text-center py-16 text-slate-500">
-            Solana wallet support coming soon
-          </div>
-        )}
-        {activeTab === 'bitcoin' && (
-          <div className="text-center py-16 text-slate-500">
-            Bitcoin wallet support coming soon
-          </div>
-        )}
+        <EvmWalletTab />
       </div>
     </div>
   );
