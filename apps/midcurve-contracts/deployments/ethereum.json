@@ -8,6 +8,10 @@
     "UniswapV3Vault": "0x9E0F94767dC8EF5f13e3F5991A9e09075055ED52",
     "AllowlistedUniswapV3Vault": "0x7F48F7F2B414c0DD1eBd5CaC9f57Cda55c153150",
     "UniswapV3VaultFactory": "0x49D1E06734255cc81634aD9E99cBb8B8457cD5d2",
-    "UniswapV3VaultPositionCloser": "0x1b373BA92c24e1aCA38bC0d78CB64209F81DDe2E"
+    "UniswapV3VaultPositionCloser": "0x1b373BA92c24e1aCA38bC0d78CB64209F81DDe2E",
+    "MidcurveTreasuryFactory": "0xDc97D7a42Eb4A22e651a9AA91A1300f7A19F9fe8"
+  },
+  "references": {
+    "MidcurveTreasuryImplementation": "0xB05424bE963033B21b2740A221ceaAf20837A0CC"
   }
 }
