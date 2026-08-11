@@ -212,6 +212,26 @@ class OperatorNonceServiceImpl {
    * Best-effort by nature. A caller that dies before calling this leaves the gap to the
    * staleness path, which is why both exist.
    *
+   * ## What this does not fix
+   *
+   * Release is a mitigation, not an elimination. The concurrent case is the residual one:
+   * a refuel takes N, an execution takes N+1, and the refuel's broadcast then fails.
+   * Rollback is correctly refused — N+1 is live — so the gap at N remains and the
+   * execution's transaction cannot mine until something fills it.
+   *
+   * Note what "fills it" requires. The staleness window makes the *next allocation* reissue
+   * N; it does not itself send anything. So the delay is the window plus however long until
+   * some transaction is actually allocated and mined — the next triggered order, or the
+   * next refuel tick up to two hours out. Bounding it at the window constant would be
+   * optimistic.
+   *
+   * Meanwhile the execution exhausts its three attempts in about three minutes and is
+   * marked failed. That state is not durable: close-order events are ingested per closer
+   * contract rather than per order, and handleExecuted() resolves by orderIdentityHash with
+   * no state filter, so a transaction that mines later still deletes the row and logs
+   * ORDER_EXECUTED. Either it mines and the record converges, or it never mines and
+   * `failed` was right.
+   *
    * @returns whether the counter was actually rolled back
    */
   async release(input: {
