@@ -512,6 +512,40 @@ model CloseOrder {
   @@schema("public")
 }
 
+// OperatorNonce - Single source of nonce assignment for a signing EOA on a chain
+//
+// Two independent processes sign with the same operator key: the close-order executor in
+// midcurve-automation and RefuelOperatorRule in midcurve-business-logic. Both used to read
+// the chain nonce themselves and pass it to the signer, so two concurrent signings could
+// receive the same value and one transaction would be dropped.
+//
+// This row is the assignment authority. The signer allocates from it inside the signing
+// call — there is no route that signs without going through it — and the row's own lock
+// serialises concurrent allocations. The caller still observes the chain, because the
+// signer is deliberately isolated from RPC, and passes that observation in as a floor.
+//
+// nextNonce is the next value to hand out. It is never lowered except by the staleness
+// reset in OperatorNonceService, which exists because a nonce that was allocated but never
+// broadcast would otherwise strand every later transaction behind a permanent gap.
+model OperatorNonce {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  // Touched on every allocation. The staleness reset reads this, so it must reflect
+  // allocation time rather than any other write.
+  updatedAt DateTime @updatedAt
+
+  chainId Int
+  // EIP-55 checksummed signing address
+  address String
+
+  // Next nonce to hand out for (chainId, address)
+  nextNonce Int
+
+  @@unique([chainId, address])
+  @@map("operator_nonces")
+  @@schema("public")
+}
+
 // OnchainDataSubscribers - Generic table for onchain event subscriptions
 // Discriminator pattern: 'erc20-approval', future: 'erc20-transfer', etc.
 // Used by midcurve-onchain-data to manage WebSocket subscriptions for various event types

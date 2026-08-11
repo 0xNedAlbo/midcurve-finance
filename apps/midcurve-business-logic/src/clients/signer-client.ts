@@ -39,7 +39,11 @@ export interface SignRefuelOperatorParams {
   hops: HopInput[];
   gasLimit: string;
   gasPrice: string;
-  nonce: number;
+  /**
+   * The caller's on-chain nonce observation, sent as a floor. The signer assigns the
+   * value actually signed, so this cannot collide with a concurrent close-order signing.
+   */
+  chainNonce: number;
 }
 
 // =============================================================================
