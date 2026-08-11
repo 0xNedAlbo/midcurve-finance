@@ -5,6 +5,7 @@ import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { MidcurveTreasury } from "../../contracts/treasury/MidcurveTreasury.sol";
+import { MidcurveTreasuryFactory } from "../../contracts/treasury/MidcurveTreasuryFactory.sol";
 import { IMidcurveTreasury } from "../../contracts/treasury/interfaces/IMidcurveTreasury.sol";
 import { IMidcurveSwapRouter } from "../../contracts/swap-router/interfaces/IMidcurveSwapRouter.sol";
 
@@ -76,8 +77,15 @@ contract MockSwapRouter {
 // Tests
 // ============================================================================
 
+/// @dev Every behaviour test below runs against a *clone* built by the factory, not against a
+///      directly constructed implementation. That is deliberate: instances in production are
+///      clones, and the whole suite is what asserts their behaviour is unchanged — including
+///      the parts that read `weth` and `swapRouter`, which resolve through the delegatecall to
+///      immutables inlined in the implementation's runtime code rather than from clone storage.
 contract MidcurveTreasuryTest is Test {
     MidcurveTreasury public treasury;
+    MidcurveTreasury public implementation;
+    MidcurveTreasuryFactory public factory;
     MockERC20 public token;
     MockWETH public mockWeth;
     MockSwapRouter public mockRouter;
@@ -92,38 +100,52 @@ contract MidcurveTreasuryTest is Test {
         mockRouter = new MockSwapRouter(address(mockWeth));
         token = new MockERC20("USD Coin", "USDC");
 
-        treasury = new MidcurveTreasury(admin, operatorAddr, address(mockRouter), address(mockWeth));
+        implementation = new MidcurveTreasury(address(mockRouter), address(mockWeth));
+        factory = new MidcurveTreasuryFactory(address(implementation));
+        treasury = MidcurveTreasury(payable(factory.createTreasury(admin, operatorAddr)));
     }
 
     // ============================================================================
-    // Constructor
+    // Construction and initialization
     // ============================================================================
 
-    function test_constructor_setsState() public view {
+    function test_clone_setsState() public view {
         assertEq(treasury.admin(), admin);
         assertEq(treasury.operator(), operatorAddr);
         assertEq(address(treasury.swapRouter()), address(mockRouter));
         assertEq(treasury.weth(), address(mockWeth));
     }
 
-    function test_constructor_revertsOnZeroAdmin() public {
+    function test_initialize_revertsOnZeroAdmin() public {
         vm.expectRevert(IMidcurveTreasury.ZeroAddress.selector);
-        new MidcurveTreasury(address(0), operatorAddr, address(mockRouter), address(mockWeth));
+        factory.createTreasury(address(0), operatorAddr);
     }
 
-    function test_constructor_revertsOnZeroOperator() public {
+    function test_initialize_revertsOnZeroOperator() public {
         vm.expectRevert(IMidcurveTreasury.ZeroAddress.selector);
-        new MidcurveTreasury(admin, address(0), address(mockRouter), address(mockWeth));
+        factory.createTreasury(admin, address(0));
+    }
+
+    function test_initialize_revertsOnSecondCall() public {
+        vm.expectRevert(IMidcurveTreasury.AlreadyInitialized.selector);
+        treasury.initialize(stranger, stranger);
+    }
+
+    /// @dev The implementation marks itself initialized in its constructor, so nobody can adopt
+    ///      it by calling initialize() on it directly.
+    function test_initialize_revertsOnImplementation() public {
+        vm.expectRevert(IMidcurveTreasury.AlreadyInitialized.selector);
+        implementation.initialize(stranger, stranger);
     }
 
     function test_constructor_revertsOnZeroSwapRouter() public {
         vm.expectRevert(IMidcurveTreasury.ZeroAddress.selector);
-        new MidcurveTreasury(admin, operatorAddr, address(0), address(mockWeth));
+        new MidcurveTreasury(address(0), address(mockWeth));
     }
 
     function test_constructor_revertsOnZeroWeth() public {
         vm.expectRevert(IMidcurveTreasury.ZeroAddress.selector);
-        new MidcurveTreasury(admin, operatorAddr, address(mockRouter), address(0));
+        new MidcurveTreasury(address(mockRouter), address(0));
     }
 
     // ============================================================================

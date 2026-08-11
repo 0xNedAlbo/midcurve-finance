@@ -24,10 +24,19 @@ interface IMidcurveTreasury {
     error NotAdminOrOperator();
     error ZeroAddress();
     error EthTransferFailed();
+    error AlreadyInitialized();
 
     // ============================================================================
     // Functions
     // ============================================================================
+
+    /// @notice Bind a freshly deployed clone to its admin and operator.
+    /// @dev Called by MidcurveTreasuryFactory in the same transaction as the clone, so an
+    ///      uninitialized clone is never observable. Reverts on a second call, and on the
+    ///      implementation, which is marked initialized by its own constructor.
+    /// @param admin_ Admin address — the environment's configured admin, never the deployer
+    /// @param operator_ Operator wallet that receives ETH from refueling
+    function initialize(address admin_, address operator_) external;
 
     /// @notice Transfer any ERC20 token held by the treasury to an arbitrary address
     /// @param token ERC20 token address

@@ -19,11 +19,12 @@
  * closed.
  */
 
+import { encodeFunctionData } from 'viem';
 import type { Address, Hex, PublicClient } from 'viem';
 import {
   MIDCURVE_TREASURY_ABI,
+  MIDCURVE_TREASURY_FACTORY_ABI,
   SharedContractNameEnum,
-  buildTreasuryInitCode,
   compareAddresses,
   getChainEntry,
   getGasReadinessConfig,
@@ -69,15 +70,17 @@ export type GasReadinessUnavailableReason =
   /** system_config['admin_wallet_address'] is unset — setup wizard incomplete */
   | 'no-admin-address'
   /** No MidcurveSwapRouter registered, so a treasury cannot be constructed */
-  | 'no-swap-router';
+  | 'no-swap-router'
+  /** No MidcurveTreasuryFactory registered, so a treasury cannot be deployed */
+  | 'no-treasury-factory';
 
-/** A contract-creation transaction the caller can send as-is. */
+/** A createTreasury() call on the chain's factory, sendable as-is. */
 export interface TreasuryDeployTransaction {
-  /** Contract creation — no recipient */
-  to: null;
-  /** Creation bytecode with ABI-encoded constructor arguments appended */
+  /** The chain's registered MidcurveTreasuryFactory */
+  to: string;
+  /** Encoded createTreasury(admin, operator) */
   data: Hex;
-  /** Always "0" — the constructor is not payable */
+  /** Always "0" — createTreasury is not payable */
   value: string;
 }
 
@@ -105,6 +108,36 @@ export interface GasReadinessTreasuryInfo {
    * send ETH somewhere useless.
    */
   operatorBindingMismatch: boolean;
+  /** The admin address the registered treasury actually answers to. */
+  boundAdmin: string | null;
+  /**
+   * True when a registered treasury answers to an admin other than this
+   * environment's configured one.
+   *
+   * Checked on every readiness read, not only at registration, and the heavier
+   * of the two drifts. A stale operator misdirects a refuel while leaving the
+   * balance where the admin can still sweep it. A stale admin means nobody here
+   * can empty the treasury at all, while fees keep accruing into it. Neither
+   * announces itself; both are recorded and logged here because nothing else
+   * asks.
+   */
+  adminBindingMismatch: boolean;
+  /**
+   * Where createTreasury() would put this environment's instance.
+   *
+   * Present whenever a factory is registered. This is the address the deploy
+   * step registers, so nothing has to read it back out of a receipt.
+   */
+  expectedAddress: string | null;
+  /**
+   * An instance that exists on chain but has no shared_contracts row.
+   *
+   * Set when a kickstart deployed a treasury and never recorded it — a browser
+   * that died between the two, or a database restored from before the row
+   * existed. The flow then offers registration alone; there is nothing to
+   * deploy, and deploying anyway would strand the first instance.
+   */
+  unregisteredAddress: string | null;
 }
 
 export interface GasReadiness {
@@ -166,6 +199,7 @@ export class TreasuryRegistrationRejectedError extends Error {
       | 'invalid-address'
       | 'no-code'
       | 'not-a-treasury'
+      | 'not-from-factory'
       | 'wrong-admin'
       | 'wrong-operator'
       | 'wrong-weth'
@@ -249,6 +283,17 @@ export class GasReadinessService {
       });
     }
 
+    const factory = await this.sharedContractService.findLatestByChainAndName(
+      chainId,
+      SharedContractNameEnum.MIDCURVE_TREASURY_FACTORY,
+    );
+    if (!factory) {
+      return this.unavailable(chainId, 'no-treasury-factory', {
+        operatorAddress,
+        adminAddress,
+      });
+    }
+
     const treasury = await this.sharedContractService.findLatestByChainAndName(
       chainId,
       SharedContractNameEnum.MIDCURVE_TREASURY,
@@ -271,7 +316,9 @@ export class GasReadinessService {
 
     const treasuryInfo = await this.describeTreasury(
       chainId,
+      factory.config.address,
       treasury?.config.address ?? null,
+      adminAddress,
       operatorAddress,
     );
 
@@ -299,18 +346,24 @@ export class GasReadinessService {
       needsOperatorFunding,
       walletBalanceInsufficient:
         walletBalance !== null && walletBalance < fundingAmountWei,
-      deployTx: isRegistered
-        ? null
-        : {
-            to: null,
-            data: buildTreasuryInitCode({
-              admin: adminAddress,
-              operator: operatorAddress,
-              swapRouter: swapRouter.config.address,
-              weth: weth.address,
-            }),
-            value: '0',
-          },
+      // Nothing to deploy when a treasury is already registered, and nothing to
+      // deploy when an unregistered one was found on chain either — that one
+      // needs recording, not replacing.
+      deployTx:
+        isRegistered || treasuryInfo.unregisteredAddress
+          ? null
+          : {
+              to: normalizeAddress(factory.config.address),
+              data: encodeFunctionData({
+                abi: MIDCURVE_TREASURY_FACTORY_ABI,
+                functionName: 'createTreasury',
+                args: [
+                  normalizeAddress(adminAddress) as Address,
+                  normalizeAddress(operatorAddress) as Address,
+                ],
+              }),
+              value: '0',
+            },
       fundTx: needsOperatorFunding
         ? {
             to: normalizeAddress(operatorAddress),
@@ -336,12 +389,19 @@ export class GasReadinessService {
   /**
    * Register a freshly deployed treasury in the shared contract registry.
    *
-   * The address comes from the caller — under a plain CREATE deployment there
-   * is nothing to derive it from. Every property that makes it *this
-   * environment's* treasury is therefore verified on chain before the row is
-   * written: it must have code, it must answer the treasury interface, and its
-   * admin, operator, WETH and swap router must match what this environment
-   * would have deployed. A caller cannot register an address of their choosing.
+   * The address comes from the caller, so everything that makes it *this
+   * environment's* treasury is verified on chain before the row is written: the
+   * chain's factory must attest that it created the address, and its admin,
+   * operator, WETH and swap router must match what this environment would have
+   * deployed. A caller cannot register an address of their choosing.
+   *
+   * Provenance is `factory.isTreasury()` rather than re-deriving the address
+   * from (admin, operator). Those two are not interchangeable. The salt is
+   * keyed on the operator, so the derived address moves the moment
+   * `setOperator()` is called — and that call is the repair for a stale
+   * operator binding. A check built on re-derivation would reject every
+   * repaired treasury, permanently, and would do it to exactly the instances
+   * that had needed fixing.
    *
    * Idempotent: registering the same address twice updates the same row.
    */
@@ -367,6 +427,21 @@ export class GasReadinessService {
       throw new TreasuryRegistrationRejectedError(
         `No contract code at ${address} on chain ${chainId}`,
         'no-code',
+      );
+    }
+
+    const factoryAddress = await this.requireFactoryAddress(chainId);
+    const attested = (await client.readContract({
+      address: factoryAddress as Address,
+      abi: MIDCURVE_TREASURY_FACTORY_ABI,
+      functionName: 'isTreasury',
+      args: [address as Address],
+    })) as boolean;
+
+    if (!attested) {
+      throw new TreasuryRegistrationRejectedError(
+        `MidcurveTreasuryFactory at ${factoryAddress} did not create ${address} on chain ${chainId}`,
+        'not-from-factory',
       );
     }
 
@@ -514,49 +589,192 @@ export class GasReadinessService {
   }
 
   /**
-   * Describe a registered treasury, including which operator it pays out to.
+   * Describe the treasury situation on a chain: which one is registered, who it
+   * answers to, and — when none is registered — whether one exists anyway.
    *
-   * A treasury bound to an operator other than the current one still lets
-   * executions run — those are paid by the operator EOA directly — but its
-   * accrued fees would refuel an address nobody signs with. Detecting that is
-   * one read; it is recorded here and logged, and deliberately not surfaced to
-   * the user, who has no action available for it.
+   * Both bindings are compared on every read, not only at registration. Neither
+   * drift announces itself, and the flows that would notice run rarely:
+   *
+   * - A stale *operator* means accrued fees would refuel an address nobody
+   *   signs with. Executions still run, and the balance stays where the admin
+   *   can sweep it.
+   * - A stale *admin* means nobody in this environment can empty the treasury
+   *   at all, while fees keep accruing into it. Heavier, and until now visible
+   *   only to someone attempting a re-registration.
+   *
+   * Both are recorded and logged, and deliberately not surfaced to the user,
+   * who has no action available for either.
    */
   private async describeTreasury(
     chainId: number,
+    factoryAddress: string,
     registeredAddress: string | null,
+    adminAddress: string,
     operatorAddress: string,
   ): Promise<GasReadinessTreasuryInfo> {
+    const expectedAddress = await this.predictTreasuryAddress(
+      chainId,
+      factoryAddress,
+      adminAddress,
+      operatorAddress,
+    );
+
     if (!registeredAddress) {
+      const unregisteredAddress = await this.findUnregisteredTreasury(
+        chainId,
+        factoryAddress,
+        expectedAddress,
+        adminAddress,
+        operatorAddress,
+      );
+
       return {
         registeredAddress: null,
         boundOperator: null,
         operatorBindingMismatch: false,
+        boundAdmin: null,
+        adminBindingMismatch: false,
+        expectedAddress,
+        unregisteredAddress,
       };
     }
 
     const address = normalizeAddress(registeredAddress);
-    const client = this.getPublicClient(chainId);
-
-    const boundOperator = normalizeAddress(
-      (await client.readContract({
-        address: address as Address,
-        abi: MIDCURVE_TREASURY_ABI,
-        functionName: 'operator',
-      })) as string,
-    );
+    const bound = await this.readTreasuryParameters(chainId, address);
+    if (!bound) {
+      throw new Error(
+        `Registered treasury at ${address} on chain ${chainId} does not answer the MidcurveTreasury interface`,
+      );
+    }
 
     const operatorBindingMismatch =
-      compareAddresses(boundOperator, operatorAddress) !== 0;
+      compareAddresses(bound.operator, operatorAddress) !== 0;
+    const adminBindingMismatch =
+      compareAddresses(bound.admin, adminAddress) !== 0;
 
     if (operatorBindingMismatch) {
       this.logger.warn(
-        { chainId, treasuryAddress: address, boundOperator, operatorAddress },
+        {
+          chainId,
+          treasuryAddress: address,
+          boundOperator: bound.operator,
+          operatorAddress,
+        },
         'Registered treasury pays out to a different operator — refuel would fund an address this environment does not sign with',
       );
     }
 
-    return { registeredAddress: address, boundOperator, operatorBindingMismatch };
+    if (adminBindingMismatch) {
+      this.logger.warn(
+        {
+          chainId,
+          treasuryAddress: address,
+          boundAdmin: bound.admin,
+          adminAddress,
+        },
+        'Registered treasury answers to a different admin — fees accrue into a contract this environment cannot sweep',
+      );
+    }
+
+    return {
+      registeredAddress: address,
+      boundOperator: bound.operator,
+      operatorBindingMismatch,
+      boundAdmin: bound.admin,
+      adminBindingMismatch,
+      expectedAddress,
+      unregisteredAddress: null,
+    };
+  }
+
+  /** Where the chain's factory would place this environment's instance. */
+  private async predictTreasuryAddress(
+    chainId: number,
+    factoryAddress: string,
+    adminAddress: string,
+    operatorAddress: string,
+  ): Promise<string> {
+    const predicted = (await this.getPublicClient(chainId).readContract({
+      address: normalizeAddress(factoryAddress) as Address,
+      abi: MIDCURVE_TREASURY_FACTORY_ABI,
+      functionName: 'predictTreasury',
+      args: [
+        normalizeAddress(adminAddress) as Address,
+        normalizeAddress(operatorAddress) as Address,
+      ],
+    })) as string;
+
+    return normalizeAddress(predicted);
+  }
+
+  /**
+   * Find a treasury that exists on chain but was never recorded.
+   *
+   * Two sources, because the cheap one is not sufficient:
+   *
+   * 1. The predicted address. Covers the common case — a kickstart whose
+   *    browser died between the deploy confirming and the registration call.
+   * 2. `factory.treasuriesOf(admin)`. Covers the case the prediction cannot:
+   *    the salt is keyed on the operator, so once `setOperator()` has been
+   *    called the live instance no longer sits at the predicted address. Were
+   *    discovery to stop at step 1, a restored database would deploy a second
+   *    treasury and strand the first — in precisely the recovery scenario this
+   *    exists to serve.
+   */
+  private async findUnregisteredTreasury(
+    chainId: number,
+    factoryAddress: string,
+    expectedAddress: string,
+    adminAddress: string,
+    operatorAddress: string,
+  ): Promise<string | null> {
+    const client = this.getPublicClient(chainId);
+
+    const codeAtExpected = await client.getCode({
+      address: expectedAddress as Address,
+    });
+    if (codeAtExpected && codeAtExpected !== '0x') {
+      this.logger.info(
+        { chainId, treasuryAddress: expectedAddress },
+        'Found a deployed but unregistered treasury at the expected address',
+      );
+      return expectedAddress;
+    }
+
+    const candidates = (await client.readContract({
+      address: normalizeAddress(factoryAddress) as Address,
+      abi: MIDCURVE_TREASURY_FACTORY_ABI,
+      functionName: 'treasuriesOf',
+      args: [normalizeAddress(adminAddress) as Address],
+    })) as readonly string[];
+
+    for (const candidate of candidates) {
+      const address = normalizeAddress(candidate);
+      const bound = await this.readTreasuryParameters(chainId, address);
+      if (bound && compareAddresses(bound.operator, operatorAddress) === 0) {
+        this.logger.info(
+          { chainId, treasuryAddress: address, expectedAddress },
+          'Found a deployed but unregistered treasury via the factory admin index — its operator has changed since it was deployed',
+        );
+        return address;
+      }
+    }
+
+    return null;
+  }
+
+  /** The chain's registered factory address, or a throw naming what is missing. */
+  private async requireFactoryAddress(chainId: number): Promise<string> {
+    const factory = await this.sharedContractService.findLatestByChainAndName(
+      chainId,
+      SharedContractNameEnum.MIDCURVE_TREASURY_FACTORY,
+    );
+    if (!factory) {
+      throw new Error(
+        `No MidcurveTreasuryFactory registered on chain ${chainId} — cannot verify a treasury`,
+      );
+    }
+    return normalizeAddress(factory.config.address);
   }
 
   private unavailable(
@@ -587,6 +805,10 @@ export class GasReadinessService {
         registeredAddress: null,
         boundOperator: null,
         operatorBindingMismatch: false,
+        boundAdmin: null,
+        adminBindingMismatch: false,
+        expectedAddress: null,
+        unregisteredAddress: null,
       },
       needsTreasuryRegistration: false,
       needsOperatorFunding: false,

@@ -3,4 +3,3 @@
  */
 
 export * from './address.js';
-export * from './treasury-deploy.js';
