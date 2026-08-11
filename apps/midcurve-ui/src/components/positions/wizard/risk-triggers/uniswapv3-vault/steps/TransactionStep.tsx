@@ -35,6 +35,8 @@ import {
   type VaultPositionCloserCall,
 } from '@/hooks/automation/useMulticallVaultPositionCloser';
 import { useVaultSharedContract } from '@/hooks/automation/useVaultSharedContract';
+import { useGasReadiness } from '@/hooks/automation/useGasReadiness';
+import { useGasReadinessSteps } from '@/components/positions/automation/gas-readiness';
 import { useConfig } from '@/providers/ConfigProvider';
 import { getChainSlugByChainId } from '@/config/chains';
 import { useUniswapV3VaultRefreshPosition } from '@/hooks/positions/uniswapv3-vault/useUniswapV3VaultRefreshPosition';
@@ -131,6 +133,20 @@ export function TransactionStep() {
   });
 
   const needsApproval = needsCreate && !erc20Approval.isApproved;
+
+  // ----- Gas readiness gate -----
+  // Whether this chain's automation can actually pay to execute the order.
+  // A failed read leaves `readiness` null and the gate renders nothing — the
+  // registration below must never be blocked by it.
+  const { readiness: gasReadiness } = useGasReadiness(
+    chainId || undefined,
+    connectedAddress,
+  );
+  const gasReadinessSteps = useGasReadinessSteps({
+    chainId,
+    readiness: gasReadiness,
+    isRegisteringNewOrder: needsCreate,
+  });
 
   // ----- Compute trigger ticks -----
   const currentSlTick = useMemo(() => {
@@ -693,6 +709,7 @@ export function TransactionStep() {
         </h3>
         <div className="space-y-3">
           {(needsApproval || approvalDone) && erc20Approval.element}
+          {gasReadinessSteps.element}
           {renderMulticallRow()}
 
           {/* Confirm close order events via API */}

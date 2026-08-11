@@ -3,6 +3,13 @@
  *
  * When no order exists: green "+" button to create via wizard.
  * When order exists: 3-zone inline control (toggle monitoring | edit | cancel).
+ *
+ * This button NAVIGATES to the risk-triggers wizard; it never registers an
+ * order itself. That is load-bearing: the gas readiness gate lives in the
+ * wizard's final step, and "no entry point without the gate" holds only
+ * because this surface routes through it. If this is ever changed to register
+ * inline, it needs the gate too — see
+ * components/positions/automation/gas-readiness/GasReadinessSteps.tsx.
  */
 
 'use client';

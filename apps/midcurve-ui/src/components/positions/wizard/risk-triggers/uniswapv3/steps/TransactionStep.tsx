@@ -26,8 +26,10 @@ import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnecti
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
+import { useGasReadiness } from '@/hooks/automation/useGasReadiness';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
+import { useGasReadinessSteps } from '@/components/positions/automation/gas-readiness';
 import { useConfig } from '@/providers/ConfigProvider';
 import { getChainSlugByChainId } from '@/config/chains';
 import { apiClientFn } from '@/lib/api-client';
@@ -159,10 +161,26 @@ export function TransactionStep() {
   }, [state.takeProfit, state.discoveredPool, tokenInfo]);
 
   // ----- Determine if NFPM approval is needed -----
+  const isRegisteringNewOrder =
+    slOperation === 'CREATE' || tpOperation === 'CREATE';
+
   const needsApproval = useMemo(() => {
-    const needsCreate = slOperation === 'CREATE' || tpOperation === 'CREATE';
-    return needsCreate && !operatorApproval.isApproved;
-  }, [slOperation, tpOperation, operatorApproval.isApproved]);
+    return isRegisteringNewOrder && !operatorApproval.isApproved;
+  }, [isRegisteringNewOrder, operatorApproval.isApproved]);
+
+  // ----- Gas readiness gate -----
+  // Whether this chain's automation can actually pay to execute the order.
+  // A failed read leaves `readiness` null and the gate renders nothing — the
+  // registration below must never be blocked by it.
+  const { readiness: gasReadiness } = useGasReadiness(
+    chainId || undefined,
+    connectedAddress,
+  );
+  const gasReadinessSteps = useGasReadinessSteps({
+    chainId,
+    readiness: gasReadiness,
+    isRegisteringNewOrder,
+  });
 
   // ----- Build sub-operation labels (for display) -----
   const subOperations = useMemo((): SubOperation[] => {
@@ -698,6 +716,7 @@ export function TransactionStep() {
         </h3>
         <div className="space-y-3">
           {(needsApproval || approvalDone) && approvalPrompt.element}
+          {gasReadinessSteps.element}
           {renderMulticallRow()}
 
           {/* Confirm close order events via API */}
