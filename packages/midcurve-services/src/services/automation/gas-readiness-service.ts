@@ -104,8 +104,12 @@ export interface GasReadinessTreasuryInfo {
   /**
    * True when a treasury is registered but pays out to an address other than
    * this environment's operator. Automation still executes — execution is paid
-   * by the operator EOA directly — but the refuel loop, once it runs, would
-   * send ETH somewhere useless.
+   * by the operator EOA directly — but the refuel loop stops working:
+   * `refuelOperator` is `onlyAdminOrOperator`, so a key that is neither reverts
+   * `NotAdminOrOperator`. It does not send ETH somewhere useless; it fails,
+   * having spent gas from an operator that is low by definition of a refuel
+   * having been attempted. RefuelOperatorRule checks the same binding on every
+   * run and refuses to sign rather than learning this on chain.
    */
   operatorBindingMismatch: boolean;
   /** The admin address the registered treasury actually answers to. */
@@ -595,9 +599,9 @@ export class GasReadinessService {
    * Both bindings are compared on every read, not only at registration. Neither
    * drift announces itself, and the flows that would notice run rarely:
    *
-   * - A stale *operator* means accrued fees would refuel an address nobody
-   *   signs with. Executions still run, and the balance stays where the admin
-   *   can sweep it.
+   * - A stale *operator* means the refuel reverts `NotAdminOrOperator` rather
+   *   than reaching anyone. Executions still run, and the balance stays where
+   *   the admin can sweep it.
    * - A stale *admin* means nobody in this environment can empty the treasury
    *   at all, while fees keep accruing into it. Heavier, and until now visible
    *   only to someone attempting a re-registration.
@@ -660,7 +664,7 @@ export class GasReadinessService {
           boundOperator: bound.operator,
           operatorAddress,
         },
-        'Registered treasury pays out to a different operator — refuel would fund an address this environment does not sign with',
+        'Registered treasury pays out to a different operator — refuel would revert NotAdminOrOperator, not reach it',
       );
     }
 
