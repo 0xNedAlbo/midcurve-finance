@@ -24,6 +24,7 @@ import {
   PositionListService,
   UniswapV3CloseOrderService,
   SharedContractService,
+  GasReadinessService,
   AutomationLogService,
   FavoritePoolService,
   UniswapV3SubgraphClient,
@@ -56,6 +57,7 @@ let _uniswapV3PositionService: UniswapV3PositionService | null = null;
 let _positionListService: PositionListService | null = null;
 let _uniswapV3CloseOrderService: UniswapV3CloseOrderService | null = null;
 let _sharedContractService: SharedContractService | null = null;
+let _gasReadinessService: GasReadinessService | null = null;
 let _automationLogService: AutomationLogService | null = null;
 let _favoritePoolService: FavoritePoolService | null = null;
 let _swapRouterService: SwapRouterService | null = null;
@@ -237,6 +239,16 @@ export function getSharedContractService(): SharedContractService {
     _sharedContractService = new SharedContractService();
   }
   return _sharedContractService;
+}
+
+/**
+ * Get singleton instance of GasReadinessService
+ */
+export function getGasReadinessService(): GasReadinessService {
+  if (!_gasReadinessService) {
+    _gasReadinessService = new GasReadinessService();
+  }
+  return _gasReadinessService;
 }
 
 /**

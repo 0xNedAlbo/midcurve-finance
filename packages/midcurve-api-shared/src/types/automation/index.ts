@@ -22,6 +22,25 @@ export {
   type ListSharedContractsResponse,
 } from './contracts.js';
 
+// Gas Readiness (per-chain close-order execution funding)
+export {
+  GAS_READINESS_STATUSES,
+  type GasReadinessStatus,
+  GAS_READINESS_UNAVAILABLE_REASONS,
+  type GasReadinessUnavailableReason,
+  type SerializedTreasuryDeployTransaction,
+  type SerializedOperatorFundingTransaction,
+  type SerializedGasReadinessTreasury,
+  type GasReadinessData,
+  type GetGasReadinessResponse,
+  GasReadinessQuerySchema,
+  type GasReadinessQuery,
+  RegisterTreasuryBodySchema,
+  type RegisterTreasuryBody,
+  type RegisterTreasuryResponseData,
+  type RegisterTreasuryResponse,
+} from './gas-readiness.js';
+
 // Close Orders
 export {
   CLOSE_ORDER_TYPES,
