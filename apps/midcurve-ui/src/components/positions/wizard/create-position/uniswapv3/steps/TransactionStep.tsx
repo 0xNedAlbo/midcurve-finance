@@ -114,7 +114,9 @@ export function TransactionStep() {
   const gasReadinessSteps = useGasReadinessSteps({
     chainId: chainId ?? 0,
     readiness: gasReadiness,
-    isRegisteringNewOrder: hasAutomation,
+    // This wizard only ever creates, so "leaves an order active" is exactly
+    // "automation is enabled with at least one trigger".
+    leavesAnOrderActive: hasAutomation,
   });
 
   // Determine base/quote token addresses and amounts

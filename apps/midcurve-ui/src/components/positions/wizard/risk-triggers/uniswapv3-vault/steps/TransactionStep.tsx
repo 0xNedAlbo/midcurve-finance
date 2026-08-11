@@ -135,7 +135,21 @@ export function TransactionStep() {
   const needsApproval = needsCreate && !erc20Approval.isApproved;
 
   // ----- Gas readiness gate -----
-  // Whether this chain's automation can actually pay to execute the order.
+  // Gated on create AND edit, not create alone. Changing a trigger tick or a
+  // swap intent is the user asserting this order should fire — and it is the
+  // likelier moment for the gate to matter, since "treasury registered,
+  // operator empty" is the steady state and a user managing positions over
+  // months edits far more often than they register a first order on a chain.
+  //
+  // Only a pure cancel is exempt: removing an order needs no automation gas.
+  const leavesAnOrderActive =
+    slOperation === 'CREATE' ||
+    slOperation === 'UPDATE' ||
+    tpOperation === 'CREATE' ||
+    tpOperation === 'UPDATE' ||
+    (slSwapChanged && state.stopLoss.enabled) ||
+    (tpSwapChanged && state.takeProfit.enabled);
+
   // A failed read leaves `readiness` null and the gate renders nothing — the
   // registration below must never be blocked by it.
   const { readiness: gasReadiness } = useGasReadiness(
@@ -145,7 +159,7 @@ export function TransactionStep() {
   const gasReadinessSteps = useGasReadinessSteps({
     chainId,
     readiness: gasReadiness,
-    isRegisteringNewOrder: needsCreate,
+    leavesAnOrderActive,
   });
 
   // ----- Compute trigger ticks -----

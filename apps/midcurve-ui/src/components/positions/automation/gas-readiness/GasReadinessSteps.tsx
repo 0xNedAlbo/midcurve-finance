@@ -56,13 +56,21 @@ export interface GasReadinessStepsProps {
   /** Readiness for this chain, or null while loading or after a failed read */
   readiness: GasReadinessData | null;
   /**
-   * Whether the surrounding flow is about to register a new order.
+   * Whether the flow leaves at least one order alive on this chain — a create
+   * or an edit, on either leg.
    *
-   * False for cancels and edits: an order being cancelled needs no gas, and an
-   * order whose trigger price is being moved was already gated when it was
-   * created.
+   * Edits count. Changing a trigger tick or a swap intent is the user
+   * asserting this order should fire, and it is the likelier moment for the
+   * gate to matter: "treasury registered, operator empty" is the steady state
+   * this gate exists to keep visible, and a user managing positions over
+   * months edits far more often than they register a first order on a chain.
+   * Gating creates only would leave the one surface that can report an
+   * unfunded operator silent for everyone past their first order per chain —
+   * reproducing the invisibility the gate was built against.
+   *
+   * False only for a pure cancel: removing an order needs no automation gas.
    */
-  isRegisteringNewOrder: boolean;
+  leavesAnOrderActive: boolean;
 }
 
 export interface GasReadinessStepsResult {
@@ -91,7 +99,7 @@ function unavailableMessage(readiness: GasReadinessData): string {
 export function useGasReadinessSteps({
   chainId,
   readiness,
-  isRegisteringNewOrder,
+  leavesAnOrderActive,
 }: GasReadinessStepsProps): GasReadinessStepsResult {
   const deploy = useDeployTreasury(chainId);
   const register = useRegisterTreasury(chainId);
@@ -192,8 +200,8 @@ export function useGasReadinessSteps({
   // Nothing to render
   // ---------------------------------------------------------------------
 
-  // Not registering anything new — cancels and edits need no gas gate.
-  if (!isRegisteringNewOrder) {
+  // Nothing survives this flow — a pure cancel needs no automation gas.
+  if (!leavesAnOrderActive) {
     return { element: null, isComplete: true };
   }
 

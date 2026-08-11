@@ -207,6 +207,54 @@ describe('GasReadinessService.getReadiness', () => {
     expect(readiness.fundTx).toBeNull();
   });
 
+  it('applies ONE threshold to both the kickstart skip and the top-up trigger', async () => {
+    // Two constants meaning "can pay" would drift, and the drift would show up
+    // as a kickstart that completes below the threshold the top-up path then
+    // immediately re-flags. Pin them to the same boundary from both sides.
+    const threshold = 5_000_000_000_000_000n; // Arbitrum
+
+    const kickstartAtThreshold = await makeHarness({
+      treasuryAddress: null,
+      operatorBalance: threshold,
+    }).service.getReadiness(ARBITRUM);
+
+    const kickstartBelow = await makeHarness({
+      treasuryAddress: null,
+      operatorBalance: threshold - 1n,
+    }).service.getReadiness(ARBITRUM);
+
+    const topUpAtThreshold = await makeHarness({
+      treasuryAddress: TREASURY,
+      operatorBalance: threshold,
+    }).service.getReadiness(ARBITRUM);
+
+    const topUpBelow = await makeHarness({
+      treasuryAddress: TREASURY,
+      operatorBalance: threshold - 1n,
+    }).service.getReadiness(ARBITRUM);
+
+    // Same balance, same verdict on funding, whether or not a treasury exists.
+    expect(kickstartAtThreshold.needsOperatorFunding).toBe(false);
+    expect(topUpAtThreshold.needsOperatorFunding).toBe(false);
+    expect(kickstartBelow.needsOperatorFunding).toBe(true);
+    expect(topUpBelow.needsOperatorFunding).toBe(true);
+
+    // And the threshold reported to the caller is the one being applied.
+    expect(kickstartAtThreshold.readinessThresholdWei).toBe(threshold.toString());
+    expect(topUpAtThreshold.readinessThresholdWei).toBe(threshold.toString());
+  });
+
+  it('does not leave a completed kickstart below the top-up threshold', async () => {
+    // The end state of a kickstart whose funding step was skipped must be
+    // 'ready', not a 'needs-topup' the user is immediately shown again.
+    const afterKickstart = await makeHarness({
+      treasuryAddress: TREASURY, // registration completed
+      operatorBalance: 5_000_000_000_000_000n, // funding was skipped at exactly the threshold
+    }).service.getReadiness(ARBITRUM);
+
+    expect(afterKickstart.status).toBe('ready');
+  });
+
   it('treats a balance exactly at the threshold as ready', async () => {
     const { service } = makeHarness({
       treasuryAddress: TREASURY,
