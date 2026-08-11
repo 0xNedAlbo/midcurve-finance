@@ -17,16 +17,6 @@ export const MIDCURVE_TREASURY_ABI = [
     "type": "constructor",
     "inputs": [
       {
-        "name": "admin_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "operator_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "swapRouter_",
         "type": "address",
         "internalType": "address"
@@ -55,6 +45,24 @@ export const MIDCURVE_TREASURY_ABI = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [
+      {
+        "name": "admin_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "operator_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -323,6 +331,11 @@ export const MIDCURVE_TREASURY_ABI = [
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
   },
   {
     "type": "error",

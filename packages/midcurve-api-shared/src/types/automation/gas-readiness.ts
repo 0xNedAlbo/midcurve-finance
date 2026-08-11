@@ -30,6 +30,7 @@ export const GAS_READINESS_UNAVAILABLE_REASONS = [
   'no-operator-address',
   'no-admin-address',
   'no-swap-router',
+  'no-treasury-factory',
 ] as const;
 
 export type GasReadinessUnavailableReason =
@@ -39,11 +40,11 @@ export type GasReadinessUnavailableReason =
 // GET /api/v1/automation/gas-readiness/:chainId
 // =============================================================================
 
-/** A contract-creation transaction the frontend can send as-is. */
+/** A createTreasury() call on the chain's factory, sendable as-is. */
 export interface SerializedTreasuryDeployTransaction {
-  /** Contract creation — no recipient */
-  to: null;
-  /** Creation bytecode with ABI-encoded constructor arguments appended */
+  /** The chain's registered MidcurveTreasuryFactory */
+  to: string;
+  /** Encoded createTreasury(admin, operator) */
   data: string;
   /** Always "0" */
   value: string;
@@ -59,6 +60,30 @@ export interface SerializedGasReadinessTreasury {
   registeredAddress: string | null;
   boundOperator: string | null;
   operatorBindingMismatch: boolean;
+  /**
+   * The admin the registered treasury actually answers to.
+   *
+   * Read on every readiness check, not only at registration. A treasury whose
+   * admin has drifted from this environment's configured admin is one nobody
+   * here can sweep — heavier than an operator drift, which only misdirects a
+   * refuel while leaving the funds retrievable.
+   */
+  boundAdmin: string | null;
+  adminBindingMismatch: boolean;
+  /**
+   * Where createTreasury() would put this environment's instance, from the
+   * factory. Present whenever a factory is registered.
+   *
+   * The address the deploy step registers, so nothing depends on reading it
+   * back out of a transaction receipt.
+   */
+  expectedAddress: string | null;
+  /**
+   * An instance that exists on chain but has no shared_contracts row.
+   *
+   * When set, the flow offers registration alone — there is nothing to deploy.
+   */
+  unregisteredAddress: string | null;
 }
 
 export interface GasReadinessData {

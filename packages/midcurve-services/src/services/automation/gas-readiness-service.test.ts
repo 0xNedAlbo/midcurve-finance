@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { encodeFunctionData } from 'viem';
 import type { PublicClient } from 'viem';
+import { MIDCURVE_TREASURY_FACTORY_ABI } from '@midcurve/shared';
 import {
   GasReadinessService,
   TreasuryRegistrationRejectedError,
@@ -17,9 +19,13 @@ const ETHEREUM = 1;
 const OPERATOR = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 const ADMIN = '0x14Cc912F4796Cf9A5B56D0Da3a5c9C0e2eE5ad01';
 const SWAP_ROUTER = '0x5aE412a2105345f770FC6862Be7e8Fb90245C50a';
+const FACTORY = '0x9A676e781A523b5d0C0e43731313A708CB607508';
 const TREASURY = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC';
+/** What the factory's predictTreasury() returns for (ADMIN, OPERATOR). */
+const PREDICTED = '0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199';
 const WETH_ARBITRUM = '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1';
 const OTHER_OPERATOR = '0x90F79bf6EB2c4f870365E785982E1f101E93b906';
+const OTHER_ADMIN = '0x976EA74026E726554dB657fA54763abd0C3a0aa9';
 const USER_WALLET = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 
 /** Arbitrum threshold is 0.005 ETH, funding amount 0.01 ETH. */
@@ -44,6 +50,7 @@ interface HarnessOptions {
   operatorAddress?: string | null;
   adminAddress?: string | null;
   swapRouterAddress?: string | null;
+  factoryAddress?: string | null;
   treasuryAddress?: string | null;
   operatorBalance?: bigint;
   walletBalance?: bigint;
@@ -53,6 +60,12 @@ interface HarnessOptions {
   treasuryWeth?: string;
   treasurySwapRouter?: string;
   code?: string;
+  /** Whether a treasury already sits at the factory's predicted address */
+  deployedAtPredicted?: boolean;
+  /** What factory.isTreasury() answers for a registration candidate */
+  factoryAttests?: boolean;
+  /** What factory.treasuriesOf(admin) returns */
+  factoryTreasuriesOfAdmin?: string[];
 }
 
 function makeHarness(options: HarnessOptions = {}): Harness {
@@ -60,6 +73,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     operatorAddress = OPERATOR,
     adminAddress = ADMIN,
     swapRouterAddress = SWAP_ROUTER,
+    factoryAddress = FACTORY,
     treasuryAddress = null,
     operatorBalance = ABOVE_THRESHOLD,
     walletBalance = ABOVE_THRESHOLD,
@@ -68,6 +82,9 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     treasuryWeth = WETH_ARBITRUM,
     treasurySwapRouter = SWAP_ROUTER,
     code = '0x6080604052',
+    deployedAtPredicted = false,
+    factoryAttests = true,
+    factoryTreasuriesOfAdmin = [],
   } = options;
 
   const settings: Record<string, string> = {};
@@ -82,6 +99,11 @@ function makeHarness(options: HarnessOptions = {}): Harness {
         if (name === 'MidcurveSwapRouter') {
           return swapRouterAddress
             ? { config: { chainId, address: swapRouterAddress } }
+            : null;
+        }
+        if (name === 'MidcurveTreasuryFactory') {
+          return factoryAddress
+            ? { config: { chainId, address: factoryAddress } }
             : null;
         }
         if (name === 'MidcurveTreasury') {
@@ -101,7 +123,13 @@ function makeHarness(options: HarnessOptions = {}): Harness {
         ? operatorBalance
         : walletBalance,
     ),
-    getCode: vi.fn().mockResolvedValue(code),
+    // The predicted address is empty unless the test says a kickstart already
+    // deployed there; every other address answers as a deployed contract.
+    getCode: vi.fn(async ({ address }: { address: string }) =>
+      address.toLowerCase() === PREDICTED.toLowerCase() && !deployedAtPredicted
+        ? '0x'
+        : code,
+    ),
     readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
       switch (functionName) {
         case 'operator':
@@ -112,6 +140,12 @@ function makeHarness(options: HarnessOptions = {}): Harness {
           return treasuryWeth;
         case 'swapRouter':
           return treasurySwapRouter;
+        case 'predictTreasury':
+          return PREDICTED;
+        case 'isTreasury':
+          return factoryAttests;
+        case 'treasuriesOf':
+          return factoryTreasuriesOfAdmin;
         default:
           throw new Error(`unexpected read: ${functionName}`);
       }
@@ -156,9 +190,33 @@ describe('GasReadinessService.getReadiness', () => {
     expect(readiness.needsTreasuryRegistration).toBe(true);
     expect(readiness.treasury.registeredAddress).toBeNull();
     expect(readiness.deployTx).not.toBeNull();
-    expect(readiness.deployTx?.to).toBeNull();
+    expect(readiness.deployTx?.to).toBe(FACTORY);
     expect(readiness.deployTx?.value).toBe('0');
     expect(readiness.deployTx?.data).toMatch(/^0x[0-9a-f]+$/i);
+  });
+
+  it('sends the deploy to the factory as createTreasury(admin, operator)', async () => {
+    const { service } = makeHarness({ treasuryAddress: null });
+
+    const readiness = await service.getReadiness(ARBITRUM);
+    const data = readiness.deployTx?.data ?? '';
+
+    // createTreasury(address,address) — selector plus two padded addresses.
+    expect(data).toBe(
+      encodeFunctionData({
+        abi: MIDCURVE_TREASURY_FACTORY_ABI,
+        functionName: 'createTreasury',
+        args: [ADMIN, OPERATOR],
+      }),
+    );
+  });
+
+  it('reports the address the deploy will produce, so nothing reads it back from a receipt', async () => {
+    const { service } = makeHarness({ treasuryAddress: null });
+
+    const readiness = await service.getReadiness(ARBITRUM);
+
+    expect(readiness.treasury.expectedAddress).toBe(PREDICTED);
   });
 
   it('reports needs-topup when the treasury is registered but the operator is short', async () => {
@@ -299,6 +357,17 @@ describe('GasReadinessService.getReadiness', () => {
       expect(readiness.needsTreasuryRegistration).toBe(false);
     });
 
+    it('when no MidcurveTreasuryFactory is registered — a treasury cannot be deployed', async () => {
+      const { service } = makeHarness({ factoryAddress: null });
+
+      const readiness = await service.getReadiness(ARBITRUM);
+
+      expect(readiness.status).toBe('unavailable');
+      expect(readiness.unavailableReason).toBe('no-treasury-factory');
+      expect(readiness.deployTx).toBeNull();
+      expect(readiness.needsTreasuryRegistration).toBe(false);
+    });
+
     it('when the admin address was never configured', async () => {
       const { service } = makeHarness({ adminAddress: null });
 
@@ -364,6 +433,114 @@ describe('GasReadinessService.getReadiness', () => {
       const readiness = await service.getReadiness(ARBITRUM);
 
       expect(readiness.treasury.operatorBindingMismatch).toBe(false);
+    });
+  });
+
+  describe('admin binding', () => {
+    // The heavier of the two drifts: a treasury whose admin is not this
+    // environment's is one nobody here can sweep, while fees keep accruing
+    // into it. Until this check existed the condition was visible only to
+    // somebody attempting a re-registration.
+    it('flags a treasury answering to a different admin', async () => {
+      const { service } = makeHarness({
+        treasuryAddress: TREASURY,
+        treasuryAdmin: OTHER_ADMIN,
+      });
+
+      const readiness = await service.getReadiness(ARBITRUM);
+
+      expect(readiness.treasury.adminBindingMismatch).toBe(true);
+      expect(readiness.treasury.boundAdmin).toBe(OTHER_ADMIN);
+    });
+
+    it('does not change the status — executions and fee accrual are unaffected', async () => {
+      const { service } = makeHarness({
+        treasuryAddress: TREASURY,
+        treasuryAdmin: OTHER_ADMIN,
+        operatorBalance: ABOVE_THRESHOLD,
+      });
+
+      expect((await service.getReadiness(ARBITRUM)).status).toBe('ready');
+    });
+
+    it('is false for a correctly bound treasury', async () => {
+      const { service } = makeHarness({ treasuryAddress: TREASURY });
+
+      const readiness = await service.getReadiness(ARBITRUM);
+
+      expect(readiness.treasury.adminBindingMismatch).toBe(false);
+      expect(readiness.treasury.boundAdmin).toBe(ADMIN);
+    });
+
+    it('reports both drifts independently', async () => {
+      const { service } = makeHarness({
+        treasuryAddress: TREASURY,
+        treasuryAdmin: OTHER_ADMIN,
+        treasuryBoundOperator: OTHER_OPERATOR,
+      });
+
+      const readiness = await service.getReadiness(ARBITRUM);
+
+      expect(readiness.treasury.adminBindingMismatch).toBe(true);
+      expect(readiness.treasury.operatorBindingMismatch).toBe(true);
+    });
+  });
+
+  describe('deployed but unregistered', () => {
+    it('offers registration alone when a treasury already sits at the expected address', async () => {
+      const { service } = makeHarness({
+        treasuryAddress: null,
+        deployedAtPredicted: true,
+      });
+
+      const readiness = await service.getReadiness(ARBITRUM);
+
+      expect(readiness.needsTreasuryRegistration).toBe(true);
+      expect(readiness.treasury.unregisteredAddress).toBe(PREDICTED);
+      expect(readiness.deployTx).toBeNull();
+    });
+
+    // The salt is keyed on the operator, so once setOperator() has run the live
+    // instance no longer sits at the predicted address. Discovery has to reach
+    // it anyway, or a restored database deploys a second treasury and strands
+    // the first.
+    it('finds the instance through the factory admin index after an operator rotation', async () => {
+      const { service } = makeHarness({
+        treasuryAddress: null,
+        deployedAtPredicted: false,
+        factoryTreasuriesOfAdmin: [TREASURY],
+      });
+
+      const readiness = await service.getReadiness(ARBITRUM);
+
+      expect(readiness.treasury.unregisteredAddress).toBe(TREASURY);
+      expect(readiness.deployTx).toBeNull();
+    });
+
+    it('ignores an indexed instance bound to a different operator', async () => {
+      const { service } = makeHarness({
+        treasuryAddress: null,
+        deployedAtPredicted: false,
+        factoryTreasuriesOfAdmin: [TREASURY],
+        treasuryBoundOperator: OTHER_OPERATOR,
+      });
+
+      const readiness = await service.getReadiness(ARBITRUM);
+
+      expect(readiness.treasury.unregisteredAddress).toBeNull();
+      expect(readiness.deployTx).not.toBeNull();
+    });
+
+    it('offers a deploy when the factory has never created one for this admin', async () => {
+      const { service } = makeHarness({
+        treasuryAddress: null,
+        factoryTreasuriesOfAdmin: [],
+      });
+
+      const readiness = await service.getReadiness(ARBITRUM);
+
+      expect(readiness.treasury.unregisteredAddress).toBeNull();
+      expect(readiness.deployTx).not.toBeNull();
     });
   });
 
@@ -441,6 +618,44 @@ describe('GasReadinessService.registerTreasury', () => {
     expect(harness.sharedContracts.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ address: TREASURY }),
     );
+  });
+
+  it('rejects an address the factory did not create', async () => {
+    const h = makeHarness({ treasuryAddress: null, factoryAttests: false });
+
+    await expect(
+      h.service.registerTreasury({ chainId: ARBITRUM, address: TREASURY }),
+    ).rejects.toMatchObject({ reason: 'not-from-factory' });
+    expect(h.sharedContracts.upsert).not.toHaveBeenCalled();
+  });
+
+  it('refuses to verify when no factory is registered', async () => {
+    const h = makeHarness({ treasuryAddress: null, factoryAddress: null });
+
+    await expect(
+      h.service.registerTreasury({ chainId: ARBITRUM, address: TREASURY }),
+    ).rejects.toThrow(/No MidcurveTreasuryFactory registered/);
+  });
+
+  // Provenance must not be re-derived from (admin, operator): setOperator() is
+  // the repair for a stale operator binding, and it moves the predicted
+  // address. A treasury that has been repaired is still ours, and must still be
+  // registrable — otherwise the fix breaks the thing it fixed.
+  it('accepts a repaired treasury whose operator no longer matches its original salt', async () => {
+    const h = makeHarness({
+      treasuryAddress: null,
+      factoryAttests: true,
+      // Not at the predicted address any more — the operator changed after deploy.
+      deployedAtPredicted: false,
+    });
+
+    const result = await h.service.registerTreasury({
+      chainId: ARBITRUM,
+      address: TREASURY,
+    });
+
+    expect(result.address).toBe(TREASURY);
+    expect(h.sharedContracts.upsert).toHaveBeenCalled();
   });
 
   it('rejects an address with no contract code', async () => {

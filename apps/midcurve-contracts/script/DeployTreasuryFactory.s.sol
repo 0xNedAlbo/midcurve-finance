@@ -19,9 +19,11 @@ import { MidcurveTreasuryFactory } from "../contracts/treasury/MidcurveTreasuryF
  * per-instance verification is needed — and none is possible, since instances are deployed by
  * users from the browser.
  *
- * Record both addresses in deployments/<network>.json. Only the factory is seeded into
- * shared_contracts; the implementation is recorded for provenance and must never be registered as
- * a treasury (see the never-seed guard in prisma/seed-contracts.ts).
+ * Record the factory under `contracts` in deployments/<network>.json, and the implementation
+ * under `references` — the latter is recorded for provenance and never seeded. Putting the
+ * implementation in `contracts` trips the never-seed guard in prisma/seed-contracts.ts, which is
+ * there because registering it as a treasury would route execution fees into a contract whose
+ * admin is address(0).
  *
  * Known WETH addresses:
  *   Arbitrum:  0x82aF49447D8a07e3bd95BD0d56f35241523fBab1
