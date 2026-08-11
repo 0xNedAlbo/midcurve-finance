@@ -35,7 +35,7 @@ export type PoolSelectionTab = 'favorites' | 'search' | 'direct';
 
 export interface TransactionRecord {
   hash: string;
-  type: 'approval' | 'mint' | 'autowallet' | 'register-sl' | 'register-tp' | 'register-orders';
+  type: 'approval' | 'mint' | 'register-sl' | 'register-tp' | 'register-orders';
   label: string;
   status: 'pending' | 'confirming' | 'confirmed' | 'failed';
 }
@@ -87,7 +87,6 @@ export interface CreatePositionWizardState {
 
   // Conditional step flags
   needsSwap: boolean;
-  needsAutowallet: boolean;
 
   // Transactions (Steps F-I)
   transactions: TransactionRecord[];
@@ -147,7 +146,6 @@ type WizardAction =
   | { type: 'SET_SL_EXIT_SLIPPAGE'; exitSlippageBps: number }
   | { type: 'SET_TP_EXIT_SLIPPAGE'; exitSlippageBps: number }
   | { type: 'SET_NEEDS_SWAP'; needsSwap: boolean }
-  | { type: 'SET_NEEDS_AUTOWALLET'; needsAutowallet: boolean }
   | { type: 'ADD_TRANSACTION'; tx: TransactionRecord }
   | { type: 'UPDATE_TRANSACTION'; hash: string; status: TransactionRecord['status'] }
   | { type: 'SET_POSITION_CREATED'; positionId: string; nftId: string }
@@ -194,7 +192,6 @@ const initialState: CreatePositionWizardState = {
   slSwapConfig: { ...DEFAULT_SWAP_CONFIG },
   tpSwapConfig: { ...DEFAULT_SWAP_CONFIG },
   needsSwap: false,
-  needsAutowallet: false,
   transactions: [],
   positionId: null,
   nftId: null,
@@ -446,9 +443,6 @@ function wizardReducer(
     case 'SET_NEEDS_SWAP':
       return { ...state, needsSwap: action.needsSwap };
 
-    case 'SET_NEEDS_AUTOWALLET':
-      return { ...state, needsAutowallet: action.needsAutowallet };
-
     case 'ADD_TRANSACTION':
       return {
         ...state,
@@ -571,21 +565,15 @@ const BASE_STEPS: WizardStep[] = [
   { id: 'configure', label: 'Configure Position' },
 ];
 
-export function getVisibleSteps(state: CreatePositionWizardState): WizardStep[] {
-  const steps = [...BASE_STEPS];
-
-  // Always: Swap step (checks balances and allows swapping if needed)
-  steps.push({ id: 'swap', label: 'Acquire Tokens' });
-
-  // Conditional: Autowallet (must be before transactions if automation is enabled)
-  if (state.automationEnabled && state.needsAutowallet) {
-    steps.push({ id: 'autowallet', label: 'Setup Automation' });
-  }
-
-  // Always: Transactions step (handles approvals, mint, and SL/TP registration)
-  steps.push({ id: 'transactions', label: 'Execute' });
-
-  return steps;
+export function getVisibleSteps(): WizardStep[] {
+  return [
+    ...BASE_STEPS,
+    // Swap step: checks balances and allows swapping if needed
+    { id: 'swap', label: 'Acquire Tokens' },
+    // Transactions step: approvals, mint, SL/TP registration, and the gas
+    // readiness gate that precedes registration
+    { id: 'transactions', label: 'Execute' },
+  ];
 }
 
 // ----- Context -----
@@ -646,7 +634,6 @@ interface CreatePositionWizardContextValue {
 
   // Conditional flags
   setNeedsSwap: (needsSwap: boolean) => void;
-  setNeedsAutowallet: (needsAutowallet: boolean) => void;
 
   // Transactions
   addTransaction: (tx: TransactionRecord) => void;
@@ -708,7 +695,7 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     setPersistedSummaryZoom(state.summaryZoom);
   }, [state.summaryZoom, setPersistedSummaryZoom]);
 
-  const steps = getVisibleSteps(state);
+  const steps = getVisibleSteps();
   const currentStep = steps[state.currentStepIndex] || steps[0];
 
   // Navigation
@@ -838,10 +825,6 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
   // Conditional flags
   const setNeedsSwap = useCallback((needsSwap: boolean) => {
     dispatch({ type: 'SET_NEEDS_SWAP', needsSwap });
-  }, []);
-
-  const setNeedsAutowallet = useCallback((needsAutowallet: boolean) => {
-    dispatch({ type: 'SET_NEEDS_AUTOWALLET', needsAutowallet });
   }, []);
 
   // Transactions
@@ -1008,7 +991,6 @@ export function CreatePositionWizardProvider({ children }: CreatePositionWizardP
     setTpSwapToQuote,
     setTpExitSlippage,
     setNeedsSwap,
-    setNeedsAutowallet,
     addTransaction,
     updateTransaction,
     setPositionCreated,
