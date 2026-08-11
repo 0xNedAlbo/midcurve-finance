@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    # This list must cover everything the Dockerfiles COPY out of the build
+    # context. A build input that is not listed here ships stale: the merge
+    # that changed it produces no image, and the change reaches production
+    # only when some unrelated commit happens to trigger a build.
     paths:
       # Trigger on any app source change
       - "apps/midcurve-api/**"
@@ -14,6 +18,17 @@ on:
       - "apps/midcurve-business-logic/**"
       # Trigger on shared packages (affects all services)
       - "packages/**"
+      # Deployed contract addresses. The API image COPYs this directory and
+      # seeds it into shared_contracts on every container start, so recording
+      # a deployment is a change to what the image contains.
+      - "apps/midcurve-contracts/deployments/**"
+      # Root manifests every image builds from. A dependency bump that touches
+      # only the lockfile still changes what gets installed.
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".npmrc"
       # Trigger on workflow changes
       - ".github/workflows/build-images.yml"
   # Allow manual trigger from GitHub Actions UI
