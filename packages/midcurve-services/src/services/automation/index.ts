@@ -19,6 +19,22 @@ export type {
   CloseOrderWithPosition,
 } from '../close-order/uniswapv3-close-order-service.js';
 
+// Gas readiness (close-order execution funding, per chain)
+export {
+  GasReadinessService,
+  TreasuryRegistrationRejectedError,
+} from './gas-readiness-service.js';
+export type {
+  GasReadiness,
+  GasReadinessStatus,
+  GasReadinessUnavailableReason,
+  GasReadinessTreasuryInfo,
+  GasReadinessServiceDependencies,
+  RegisterTreasuryInput,
+  TreasuryDeployTransaction,
+  OperatorFundingTransaction,
+} from './gas-readiness-service.js';
+
 export { SharedContractService } from './shared-contract-service.js';
 export type {
   SharedContractServiceDependencies,
