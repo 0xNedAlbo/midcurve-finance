@@ -5,9 +5,11 @@
  * chain whose automation cannot yet pay for execution.
  *
  * Each transaction is built by the backend and sent verbatim. The UI never
- * assembles calldata, never derives an address, and never reads chain state:
- * the deployed treasury address arrives from the transaction-status
- * subscription, which already reports `contractAddress` for contract creations.
+ * assembles calldata, never derives an address, and never reads chain state.
+ *
+ * The deployed treasury's address comes from the readiness response, which
+ * carries what the factory will produce for this environment before the
+ * transaction is sent. Nothing here inspects a receipt.
  */
 
 import { useCallback, useState } from 'react';
@@ -33,26 +35,19 @@ export interface UseDeployTreasuryResult {
   isWaitingForConfirmation: boolean;
   isSuccess: boolean;
   txHash: Hash | undefined;
-  /**
-   * Address of the deployed treasury, once the receipt is in.
-   *
-   * A plain CREATE deployment gives nothing to derive this from ahead of time.
-   * It comes from the backend's transaction-status subscription rather than an
-   * RPC call in the browser.
-   */
-  contractAddress: string | null;
   error: Error | null;
   reset: () => void;
 }
 
 /**
- * Deploy MidcurveTreasury from the connected wallet.
+ * Deploy a treasury by calling createTreasury() on the chain's factory.
  *
  * If the browser dies between the wallet confirming and the registration POST,
- * the treasury is deployed and unrecorded, and a later attempt deploys another.
- * That is an accepted outcome, not a defect: `sweep()` and `rescueEth()` are
- * `onlyAdmin`, and the admin address is fixed environment configuration, so an
- * orphaned treasury holds funds the admin can still retrieve.
+ * the treasury is deployed and unrecorded — but no longer lost. The next
+ * readiness read finds it, at the address the factory was always going to use
+ * or through the factory's admin index, and offers registration alone. Pressing
+ * deploy again would also be safe: createTreasury is idempotent and returns the
+ * existing instance rather than making a second one.
  */
 export function useDeployTreasury(chainId: number): UseDeployTreasuryResult {
   const {
@@ -73,8 +68,7 @@ export function useDeployTreasury(chainId: number): UseDeployTreasuryResult {
   const deploy = useCallback(
     (tx: SerializedTreasuryDeployTransaction) => {
       sendTransaction({
-        // Contract creation: no recipient, init code as calldata
-        to: undefined,
+        to: tx.to as `0x${string}`,
         data: tx.data as Hex,
         value: BigInt(tx.value),
       });
@@ -88,7 +82,6 @@ export function useDeployTreasury(chainId: number): UseDeployTreasuryResult {
     isWaitingForConfirmation: !!txHash && txWatch.status === 'pending',
     isSuccess: txWatch.status === 'success',
     txHash,
-    contractAddress: txWatch.contractAddress ?? null,
     error: (sendError as Error) ?? null,
     reset: resetSend,
   };

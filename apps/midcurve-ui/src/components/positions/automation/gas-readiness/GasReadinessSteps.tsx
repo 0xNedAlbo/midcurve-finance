@@ -85,6 +85,8 @@ function unavailableMessage(readiness: GasReadinessData): string {
   switch (readiness.unavailableReason) {
     case 'no-swap-router':
       return 'Automated closing cannot be funded on this chain: no swap router is deployed here.';
+    case 'no-treasury-factory':
+      return 'Automated closing cannot be funded on this chain: no treasury factory is deployed here.';
     case 'no-admin-address':
     case 'no-operator-address':
       return 'Automated closing cannot be funded: this instance is missing its automation configuration.';
@@ -105,16 +107,26 @@ export function useGasReadinessSteps({
   const register = useRegisterTreasury(chainId);
   const fund = useFundOperator(chainId);
 
-  // The address only exists after the deploy confirms. Held here so a failed
-  // registration can be retried against the same deployment rather than
-  // deploying a second treasury.
+  // The address to register.
+  //
+  // Either one already on chain that was never recorded — a kickstart whose
+  // browser died between the two, or a restored database — or the address the
+  // factory will produce, known before the deploy is even sent. Neither is read
+  // out of a receipt.
+  const unregisteredAddress = readiness?.treasury.unregisteredAddress ?? null;
+  const expectedAddress = readiness?.treasury.expectedAddress ?? null;
+
   const [deployedAddress, setDeployedAddress] = useState<string | null>(null);
 
   useEffect(() => {
-    if (deploy.isSuccess && deploy.contractAddress && !deployedAddress) {
-      setDeployedAddress(deploy.contractAddress);
+    if (unregisteredAddress && !deployedAddress) {
+      setDeployedAddress(unregisteredAddress);
+      return;
     }
-  }, [deploy.isSuccess, deploy.contractAddress, deployedAddress]);
+    if (deploy.isSuccess && expectedAddress && !deployedAddress) {
+      setDeployedAddress(expectedAddress);
+    }
+  }, [unregisteredAddress, deploy.isSuccess, expectedAddress, deployedAddress]);
 
   // Register as soon as the address is known. Leaving a deployed-but-
   // unregistered treasury behind is the one outcome worth chasing: the deploy
@@ -132,10 +144,14 @@ export function useGasReadinessSteps({
     }
   }, [deployedAddress, registerSettled, registerTreasury]);
 
-  const needsDeploy = readiness?.needsTreasuryRegistration ?? false;
+  // Registration is always needed when there is no row. A deploy is needed only
+  // when there is also nothing on chain to record — the backend says so by
+  // withholding deployTx, rather than the UI inferring it.
+  const needsRegistration = readiness?.needsTreasuryRegistration ?? false;
+  const needsDeploy = !!readiness?.deployTx;
   const needsFunding = readiness?.needsOperatorFunding ?? false;
 
-  const deployComplete = !needsDeploy || register.isSuccess;
+  const deployComplete = !needsRegistration || register.isSuccess;
   const fundComplete = !needsFunding || fund.isSuccess;
 
   const nativeSymbol = getChainEntry(chainId).nativeCurrency.symbol;
@@ -251,7 +267,7 @@ export function useGasReadinessSteps({
         <GasReadinessExplainer
           fundingAmountWei={readiness.fundingAmountWei}
           nativeSymbol={nativeSymbol}
-          isTopUpOnly={!needsDeploy}
+          isTopUpOnly={!needsRegistration}
         />
 
         {needsDeploy && deployPrompt.element}
