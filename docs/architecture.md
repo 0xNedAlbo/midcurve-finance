@@ -542,7 +542,7 @@ midcurve-onchain-data/
 - `UniswapV3ProcessCloseOrderEventsRule` — syncs close orders with on-chain state, emits domain events
 
 *Automation infrastructure (`automation/`):*
-- `RefuelOperatorRule` — keeps the operator EOA topped up on each chain via the gas escrow
+- `RefuelOperatorRule` — swaps accrued `MidcurveTreasury` fees to ETH and sends them to the operator EOA when its balance falls to 0.01 ETH or below. **Registers unconditionally, schedules conditionally:** `onStartup()` queries `shared_contracts` for a `MidcurveTreasury` and returns without calling `registerSchedule` when there are none, with no later re-check. A treasury registered at runtime — which is what the gas readiness gate does — therefore leaves this rule unscheduled until the service restarts. A registered rule with a healthy startup log and no cron behind it looks identical to a working one; registered, scheduled, and has-ever-fired are three separate questions.
 
 **Key Characteristics:**
 - Rule-based architecture - Abstract `BusinessRule` base class with lifecycle hooks
@@ -1017,6 +1017,43 @@ API adds CORS headers to all responses:
           │                               │
 └─────────┴───────────────────────────────┘
 ```
+
+---
+
+### 7. Gas Readiness (Close-Order Execution Funding)
+
+Close orders are the only thing in the system that acts without the user present. Something has to hold a key and something has to pay for gas.
+
+**Who pays.** One operator EOA per environment — `system_config['operator.address']`, created by the signer on automation startup — pays for every close-order execution on every chain, out of its native balance. Not per chain, not per user, not per position.
+
+**Why a gate rather than a deploy step.** Gas infrastructure is not a deployment prerequisite. It is set up from the close-order flows, on first need, per chain. The alternative is a documented deploy step that someone forgets, producing orders that look active and never fire. This trades a one-time setup burden per chain against a silent failure that only surfaces when a stop-loss does not.
+
+**The check.** `GasReadinessService.getReadiness(chainId, walletAddress?)` returns one of four states:
+
+| Status | Meaning | Steps offered |
+|---|---|---|
+| `ready` | Treasury registered, operator above the chain's threshold | none — the flow is unchanged |
+| `needs-kickstart` | No `MidcurveTreasury` on this chain | deploy → register → fund |
+| `needs-topup` | Treasury registered, operator below threshold | fund |
+| `unavailable` | The chain cannot host one at all | one non-actionable line |
+
+`unavailable` covers a missing `MidcurveSwapRouter` row (the treasury constructor takes its address), a missing `admin_wallet_address`, a missing operator address, and a chain with no readiness numbers. It performs no chain reads.
+
+**Where it appears.** Three components, one shared implementation: the create-position wizard's execute step and both risk-triggers wizards (NFT and vault). The SL/TP buttons on the position card and the Automation tab's "Edit SL/TP Orders" link navigate into a risk-triggers wizard rather than registering inline, which is what makes "no entry point without the gate" hold. That property depends on those surfaces continuing to navigate; the components say so in their docblocks.
+
+**Deployment.** `MidcurveTreasury` is deployed by the connected user as a plain contract creation — creation bytecode plus ABI-encoded constructor arguments, no `to`. The address is learned from the transaction-status subscription, which already reports `contractAddress` for contract creations, so the frontend still performs no RPC reads. `admin` is the environment's configured admin, never the deploying user, so no user gains control over the treasury's funds by kickstarting a chain.
+
+The creation bytecode ships as a generated TypeScript constant in `@midcurve/shared` because `out/` is gitignored; CI recompiles and fails on drift.
+
+**Duplicates and orphans are tolerated.** The address is not predictable, so a browser that dies between the wallet confirming and the registration call leaves a deployed, unrecorded treasury, and a later attempt deploys another. That is accepted rather than engineered around: `sweep()` and `rescueEth()` are `onlyAdmin` and the admin address is environment configuration, so an orphaned treasury holds funds the admin can still retrieve. What must hold is narrower — **once the `shared_contracts` row exists it is the single source of truth**, and a chain with a registered treasury never offers a deploy again.
+
+Recovering an orphan means finding its address in the deployer's transaction history. Nothing lists deployed treasuries.
+
+**Registration is verified, not trusted.** The address comes from the client, so `registerTreasury` reads `admin()`, `operator()`, `weth()` and `swapRouter()` off the candidate and rejects anything that is not what this environment would have deployed. A caller cannot register an address of their choosing.
+
+**Declining is permitted and unmarked.** Registration is a user transaction against the closer contract and does not depend on any of this. The gate never blocks it — there is no decline button, because leaving the gate's rows untouched already is the decline. The resulting order sits on chain looking active and fails when it triggers, carries no marker, and no surface distinguishes it from a healthy one. A failed readiness read fails open for the same reason: blocking registration would be worse than the decline the design already permits.
+
+**Operator binding drift.** A registered treasury bound to an operator other than the current one still lets executions run — those are paid by the operator EOA directly — but its accrued fees would refuel an address nobody signs with. The readiness read reports this and logs it at warn level; it is not surfaced to the user, who has no action available for it. Rotating the operator key is the way to produce it; see the note on key recreation in the close-order path.
 
 ---
 
