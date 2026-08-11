@@ -56,7 +56,7 @@ const SignVaultExecuteOrderSchema = z.object({
   triggerMode: z.number().int().min(0).max(1, 'triggerMode must be 0 (LOWER) or 1 (UPPER)'),
   gasLimit: z.string().min(1, 'gasLimit is required').transform((val) => BigInt(val)),
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
-  nonce: z.number().int().nonnegative('nonce is required'),
+  chainNonce: z.number().int().nonnegative('chainNonce is required'),
   withdrawParams: WithdrawParamsSchema,
   swapParams: SwapParamsSchema,
   feeParams: FeeParamsSchema,
@@ -83,12 +83,12 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode, gasLimit, gasPrice, nonce, withdrawParams, swapParams, feeParams } = validation.data;
+  const { userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode, gasLimit, gasPrice, chainNonce, withdrawParams, swapParams, feeParams } = validation.data;
 
   logger.info({
     requestId, userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode,
     feeBps: feeParams.feeBps, gasLimit: gasLimit.toString(), gasPrice: gasPrice.toString(),
-    explicitNonce: nonce, hasSwap: swapParams.hops.length > 0,
+    chainNonce, hasSwap: swapParams.hops.length > 0,
     msg: 'Processing vault execute-order signing request',
   });
 
@@ -102,7 +102,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       triggerMode,
       gasLimit,
       gasPrice,
-      nonce,
+      chainNonce,
       withdrawParams: { amount0Min: withdrawParams.amount0Min, amount1Min: withdrawParams.amount1Min },
       swapParams: {
         guaranteedAmountIn: swapParams.guaranteedAmountIn,

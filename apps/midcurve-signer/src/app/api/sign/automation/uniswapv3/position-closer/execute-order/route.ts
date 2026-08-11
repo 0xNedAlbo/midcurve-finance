@@ -6,9 +6,11 @@
  *
  * Called by the automation service when a price trigger is met.
  *
- * Gas parameters (gasLimit, gasPrice) and nonce must be provided by the caller.
+ * Gas parameters (gasLimit, gasPrice) must be provided by the caller, and so must the
+ * caller's on-chain nonce observation (chainNonce). The nonce actually signed is assigned
+ * by OperatorNonceService, so two concurrent signings cannot collide.
  * This keeps the signer stateless and isolated from external RPC endpoints.
- * The caller is responsible for fetching the on-chain nonce.
+ * The caller is responsible for observing the on-chain nonce; the signer assigns from it.
  *
  * Prerequisites:
  * - Operator key must be initialized (via instrumentation.ts on startup)
@@ -27,7 +29,7 @@
  *     feeBps: number (0-100, max 1%),
  *     gasLimit: string (bigint as string),
  *     gasPrice: string (bigint as string),
- *     nonce: number (required, caller fetches from chain),
+ *     chainNonce: number (required, caller's on-chain observation),
  *     swapParams?: {
  *       minAmountOut: string (minimum output amount for slippage protection),
  *       deadline: number (unix timestamp or 0),
@@ -120,7 +122,7 @@ const SignExecuteOrderSchema = z.object({
   gasLimit: z.string().min(1, 'gasLimit is required').transform((val) => BigInt(val)),
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
   // Nonce is required - caller fetches from chain (signer is stateless)
-  nonce: z.number().int().nonnegative('nonce is required'),
+  chainNonce: z.number().int().nonnegative('chainNonce is required'),
   // Structured execution params
   withdrawParams: WithdrawParamsSchema,
   swapParams: SwapParamsSchema,
@@ -167,7 +169,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { userId, chainId, contractAddress, nftId, triggerMode, gasLimit, gasPrice, nonce, withdrawParams, swapParams, feeParams } = validation.data;
+  const { userId, chainId, contractAddress, nftId, triggerMode, gasLimit, gasPrice, chainNonce, withdrawParams, swapParams, feeParams } = validation.data;
 
   logger.info({
     requestId,
@@ -179,7 +181,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     feeBps: feeParams.feeBps,
     gasLimit: gasLimit.toString(),
     gasPrice: gasPrice.toString(),
-    explicitNonce: nonce,
+    chainNonce,
     hasSwap: swapParams.hops.length > 0,
     msg: 'Processing execute-order signing request',
   });
@@ -194,7 +196,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       triggerMode,
       gasLimit,
       gasPrice,
-      nonce,
+      chainNonce,
       withdrawParams: {
         amount0Min: withdrawParams.amount0Min,
         amount1Min: withdrawParams.amount1Min,

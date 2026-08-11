@@ -75,8 +75,9 @@ export interface ExecuteOrderParams {
   triggerMode: number; // 0=LOWER, 1=UPPER
   // Operator address for gas estimation
   operatorAddress: string;
-  // Nonce for transaction (caller fetches from chain)
-  nonce: number;
+  // On-chain nonce observation (caller fetches from chain); the signer assigns the
+  // value actually signed
+  chainNonce: number;
   // New structured params
   withdrawParams: WithdrawParamsInput;
   swapParams: SwapParamsInput;
@@ -207,25 +208,38 @@ class SignerClient {
    * Each execution module (NFT, vault) encodes its own calldata using
    * its contract ABI and specifies the signer endpoint to call.
    */
+  /**
+   * Hand a nonce back when its transaction never reached the chain.
+   *
+   * A nonce that is allocated and never broadcast leaves a gap, and every later
+   * transaction from the operator EOA queues behind a number the chain will never see.
+   * Releasing it on a failed broadcast closes that immediately; the signer's staleness
+   * reset is the backstop for the case where this process dies first.
+   */
+  async releaseNonce(params: { chainId: number; nonce: number }): Promise<{ rolledBack: boolean }> {
+    return this.request<{ rolledBack: boolean }>('POST', '/api/operator/nonce/release', params);
+  }
+
   async signTransaction(params: {
     userId: string;
     chainId: number;
     contractAddress: string;
     operatorAddress: string;
-    nonce: number;
+    /** On-chain nonce observation, sent as a floor — the signer assigns the actual value */
+    chainNonce: number;
     callData: `0x${string}`;
     signerEndpoint: string;
     /** Extra fields forwarded to the signer (e.g. nftId, triggerMode for logging) */
     signerPayload: Record<string, unknown>;
   }): Promise<SignedTransaction> {
-    const { userId, chainId, contractAddress, operatorAddress, nonce, callData, signerEndpoint, signerPayload } = params;
+    const { userId, chainId, contractAddress, operatorAddress, chainNonce, callData, signerEndpoint, signerPayload } = params;
 
     log.info({
       userId,
       chainId,
       contractAddress,
       operatorAddress,
-      explicitNonce: nonce,
+      chainNonce,
       signerEndpoint,
       msg: 'Estimating gas for transaction signing',
     });
@@ -271,7 +285,7 @@ class SignerClient {
       contractAddress,
       gasLimit: gasLimit.toString(),
       gasPrice: gasPrice.toString(),
-      nonce,
+      chainNonce,
       ...signerPayload,
     });
   }
@@ -282,7 +296,7 @@ class SignerClient {
    * @deprecated Use signTransaction with pre-encoded calldata instead.
    */
   async signExecuteOrder(params: ExecuteOrderParams): Promise<SignedTransaction> {
-    const { userId, chainId, contractAddress, nftId, triggerMode, operatorAddress, nonce, withdrawParams, swapParams, feeParams } =
+    const { userId, chainId, contractAddress, nftId, triggerMode, operatorAddress, chainNonce, withdrawParams, swapParams, feeParams } =
       params;
 
     const withdrawParamsTuple = {
@@ -318,7 +332,7 @@ class SignerClient {
       chainId,
       contractAddress,
       operatorAddress,
-      nonce,
+      chainNonce,
       callData,
       signerEndpoint: '/api/sign/automation/uniswapv3/position-closer/execute-order',
       signerPayload: {

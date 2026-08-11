@@ -672,16 +672,17 @@ export class CloseOrderExecutor {
       }
     }
 
-    // Always fetch on-chain nonce before signing
-    // Signer service is stateless and does not manage nonces
+    // Observe the on-chain nonce. This is a floor, not the value signed: the signer
+    // assigns from it via OperatorNonceService, which is what keeps this execution from
+    // colliding with a concurrent refuel or a second automation instance.
     const nonce = await getOnChainNonce(
       chainId as SupportedChainId,
       operatorAddress as `0x${string}`
     );
 
     log.info(
-      { orderId, positionId, operatorAddress, nonce, executionAttempts: order.executionAttempts },
-      'Fetched on-chain nonce for signing'
+      { orderId, positionId, operatorAddress, chainNonce: nonce, executionAttempts: order.executionAttempts },
+      'Observed on-chain nonce; signer will assign from it'
     );
 
     // Log ORDER_TRIGGERED for user visibility (on first attempt only)
@@ -1076,7 +1077,7 @@ export class CloseOrderExecutor {
       chainId,
       contractAddress,
       operatorAddress,
-      nonce,
+      chainNonce: nonce,
       callData,
       signerEndpoint,
       signerPayload: {
@@ -1103,10 +1104,27 @@ export class CloseOrderExecutor {
       operatorAddress,
     });
 
-    const txHash = await broadcastTransaction(
-      chainId as SupportedChainId,
-      signedTx.signedTransaction as `0x${string}`
-    );
+    // A broadcast that never lands leaves the allocated nonce spent with nothing on chain
+    // behind it, and every later transaction from the operator queues behind that gap.
+    // Hand it back rather than leaving it to the signer's staleness backstop, which is
+    // slower than this order's own retry budget.
+    let txHash: `0x${string}`;
+    try {
+      txHash = await broadcastTransaction(
+        chainId as SupportedChainId,
+        signedTx.signedTransaction as `0x${string}`
+      );
+    } catch (error) {
+      await signerClient.releaseNonce({ chainId, nonce: signedTx.nonce });
+      log.error({
+        orderId,
+        positionId,
+        nonce: signedTx.nonce,
+        error: error instanceof Error ? error.message : String(error),
+        msg: 'Broadcast failed; released the nonce so it does not block later transactions',
+      });
+      throw error;
+    }
 
     autoLog.orderExecution(log, orderId, 'waiting', { txHash });
 

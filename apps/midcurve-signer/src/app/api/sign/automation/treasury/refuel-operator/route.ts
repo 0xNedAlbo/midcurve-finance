@@ -7,7 +7,9 @@
  * Called by the business logic service to refuel the operator wallet with ETH
  * from fee tokens accumulated in the treasury.
  *
- * Gas parameters (gasLimit, gasPrice) and nonce must be provided by the caller.
+ * Gas parameters (gasLimit, gasPrice) must be provided by the caller, and so must the
+ * caller's on-chain nonce observation (chainNonce). The nonce actually signed is assigned
+ * by OperatorNonceService, so two concurrent signings cannot collide.
  */
 
 import { NextResponse } from 'next/server';
@@ -43,7 +45,7 @@ const SignRefuelOperatorSchema = z.object({
   hops: z.array(HopSchema),
   gasLimit: z.string().min(1, 'gasLimit is required').transform((val) => BigInt(val)),
   gasPrice: z.string().min(1, 'gasPrice is required').transform((val) => BigInt(val)),
-  nonce: z.number().int().nonnegative('nonce is required'),
+  chainNonce: z.number().int().nonnegative('chainNonce is required'),
 });
 
 type SignRefuelOperatorRequest = z.infer<typeof SignRefuelOperatorSchema>;
@@ -70,7 +72,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     );
   }
 
-  const { chainId, treasuryAddress, tokenIn, amountIn, minEthOut, deadline, hops, gasLimit, gasPrice, nonce } = validation.data;
+  const { chainId, treasuryAddress, tokenIn, amountIn, minEthOut, deadline, hops, gasLimit, gasPrice, chainNonce } = validation.data;
 
   logger.info({
     requestId,
@@ -78,7 +80,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
     treasuryAddress,
     tokenIn,
     amountIn: amountIn.toString(),
-    nonce,
+    chainNonce,
     hopCount: hops.length,
     msg: 'Processing refuel-operator signing request',
   });
@@ -99,7 +101,7 @@ export const POST = withInternalAuth(async (ctx: AuthenticatedRequest) => {
       })),
       gasLimit,
       gasPrice,
-      nonce,
+      chainNonce,
     });
 
     logger.info({

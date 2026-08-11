@@ -17,10 +17,16 @@
  *   roughly ten executions. Not user-editable and not estimated per position.
  *
  * A close-order execution runs roughly 500-800k gas, so these differ by orders
- * of magnitude between L1 and L2. They are deliberately *not* aligned with
- * `RefuelOperatorRule`'s single global 0.01 ETH trigger, which sits below one
- * execution's gas on Ethereum. That constant is out of scope here; the
- * disagreement is known rather than accidental.
+ * of magnitude between L1 and L2.
+ *
+ * `RefuelOperatorRule` derives its own trigger from `readinessThresholdWei`
+ * rather than carrying a constant of its own — at a multiple, so the refuel
+ * fires *before* the gate would ask the user for money the treasury could have
+ * supplied. Changing a threshold here therefore moves the refuel trigger on
+ * that chain too, and the invariant the rule's tests pin is
+ * `refuelTrigger > readinessThreshold`, not any particular multiple. Until #125
+ * the rule used a single global 0.01 ETH instead, which sat below one
+ * execution's gas on Ethereum.
  *
  * These are per-chain facts rather than per-environment secrets, so they live
  * here as constants rather than in `system_config`.

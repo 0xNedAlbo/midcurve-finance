@@ -10,6 +10,12 @@
  *
  * Security: This service has NO RPC access. Gas parameters (gasLimit, gasPrice)
  * must be provided by the caller (automation service).
+ *
+ * Nonces are the exception to "provided by the caller". The caller supplies what it
+ * observed on chain — it has RPC and this service does not — but the value actually signed
+ * is assigned by OperatorNonceService, which is the only assigner and is safe against
+ * concurrent signings. Allocation happens here rather than behind its own route so that no
+ * signing path can bypass it.
  */
 
 import {
@@ -22,6 +28,7 @@ import {
 } from 'viem';
 import { signerLogger, signerLog } from '@/lib/logger';
 import { OperatorKeyService } from './operator-key-service';
+import { operatorNonceService } from './operator-nonce-service';
 
 // =============================================================================
 // Types
@@ -88,8 +95,9 @@ export interface SignExecuteOrderInput {
   // Gas parameters from caller (signer does not access RPC)
   gasLimit: bigint;
   gasPrice: bigint;
-  // Nonce is required - caller fetches from chain (signer is stateless)
-  nonce: number;
+  // The caller's on-chain nonce observation. Used as a floor — the value actually signed
+  // is assigned by OperatorNonceService, so overlapping signings cannot collide.
+  chainNonce: number;
   // Structured execution params
   withdrawParams: WithdrawParams;
   swapParams: SwapParams;
@@ -111,7 +119,8 @@ export interface SignVaultExecuteOrderInput {
   triggerMode: number;
   gasLimit: bigint;
   gasPrice: bigint;
-  nonce: number;
+  /** The caller's on-chain nonce observation — see SignExecuteOrderInput.chainNonce */
+  chainNonce: number;
   withdrawParams: WithdrawParams;
   swapParams: SwapParams;
   feeParams: FeeParams;
@@ -133,7 +142,8 @@ export interface SignRefuelOperatorInput {
   hops: HopParams[];    // empty array for WETH direct path
   gasLimit: bigint;
   gasPrice: bigint;
-  nonce: number;
+  /** The caller's on-chain nonce observation — see SignExecuteOrderInput.chainNonce */
+  chainNonce: number;
 }
 
 /**
@@ -298,11 +308,13 @@ class AutomationSigningServiceImpl {
    * Sign an executeOrder transaction using the singleton operator key.
    */
   async signExecuteOrder(input: SignExecuteOrderInput): Promise<SignTransactionResult> {
-    const { userId, chainId, contractAddress, nftId, triggerMode, gasLimit, gasPrice, nonce, withdrawParams, swapParams, feeParams } = input;
-    signerLog.methodEntry(this.logger, 'signExecuteOrder', { userId, chainId, contractAddress, nftId: nftId.toString(), triggerMode, nonce, hasSwap: swapParams.hops.length > 0 });
+    const { userId, chainId, contractAddress, nftId, triggerMode, gasLimit, gasPrice, chainNonce, withdrawParams, swapParams, feeParams } = input;
+    signerLog.methodEntry(this.logger, 'signExecuteOrder', { userId, chainId, contractAddress, nftId: nftId.toString(), triggerMode, chainNonce, hasSwap: swapParams.hops.length > 0 });
 
     const operatorKeyService = OperatorKeyService.getInstance();
     const operatorAddress = await operatorKeyService.getOperatorAddress();
+
+    const { nonce } = await operatorNonceService.allocate({ chainId, address: operatorAddress, chainNonce });
 
     // Build param tuples
     const withdrawParamsTuple = {
@@ -385,11 +397,13 @@ class AutomationSigningServiceImpl {
    * Sign an executeOrder transaction for a UniswapV3VaultPositionCloser contract.
    */
   async signVaultExecuteOrder(input: SignVaultExecuteOrderInput): Promise<SignTransactionResult> {
-    const { userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode, gasLimit, gasPrice, nonce, withdrawParams, swapParams, feeParams } = input;
-    signerLog.methodEntry(this.logger, 'signVaultExecuteOrder', { userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode, nonce, hasSwap: swapParams.hops.length > 0 });
+    const { userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode, gasLimit, gasPrice, chainNonce, withdrawParams, swapParams, feeParams } = input;
+    signerLog.methodEntry(this.logger, 'signVaultExecuteOrder', { userId, chainId, contractAddress, vaultAddress, ownerAddress, triggerMode, chainNonce, hasSwap: swapParams.hops.length > 0 });
 
     const operatorKeyService = OperatorKeyService.getInstance();
     const operatorAddress = await operatorKeyService.getOperatorAddress();
+
+    const { nonce } = await operatorNonceService.allocate({ chainId, address: operatorAddress, chainNonce });
 
     const withdrawParamsTuple = {
       amount0Min: BigInt(withdrawParams.amount0Min),
@@ -461,11 +475,13 @@ class AutomationSigningServiceImpl {
    * Sign a refuelOperator transaction on MidcurveTreasury.
    */
   async signRefuelOperator(input: SignRefuelOperatorInput): Promise<SignTransactionResult> {
-    const { chainId, treasuryAddress, tokenIn, amountIn, minEthOut, deadline, hops, gasLimit, gasPrice, nonce } = input;
-    signerLog.methodEntry(this.logger, 'signRefuelOperator', { chainId, treasuryAddress, tokenIn, amountIn: amountIn.toString(), nonce });
+    const { chainId, treasuryAddress, tokenIn, amountIn, minEthOut, deadline, hops, gasLimit, gasPrice, chainNonce } = input;
+    signerLog.methodEntry(this.logger, 'signRefuelOperator', { chainId, treasuryAddress, tokenIn, amountIn: amountIn.toString(), chainNonce });
 
     const operatorKeyService = OperatorKeyService.getInstance();
     const operatorAddress = await operatorKeyService.getOperatorAddress();
+
+    const { nonce } = await operatorNonceService.allocate({ chainId, address: operatorAddress, chainNonce });
 
     const hopsTuple = hops.map((hop) => ({
       venueId: hop.venueId as `0x${string}`,
