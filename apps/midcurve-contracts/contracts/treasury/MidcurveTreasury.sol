@@ -11,6 +11,22 @@ import { IWETH } from "./interfaces/IWETH.sol";
 /// @notice Collects ERC20 execution fees and converts them to ETH for operator gas refueling.
 /// @dev Fee tokens accumulate from order executions. The admin or operator can call refuelOperator()
 ///      to swap tokens to WETH via MidcurveSwapRouter, unwrap to ETH, and send to the operator wallet.
+///
+///      Deployed as an EIP-1167 clone via MidcurveTreasuryFactory, one per environment per chain.
+///      The split between constructor and initialize follows what is a chain fact and what is a
+///      per-environment fact:
+///
+///      - `swapRouter` and `weth` are identical for every environment on a chain, so they are
+///        immutables of the implementation. Immutables are inlined into the implementation's
+///        runtime code, and a clone delegatecalls into that code, so every clone reads the chain's
+///        values without spending a storage slot or an initialize argument. Their zero-address
+///        checks therefore happen once per chain, at implementation deploy.
+///      - `admin` and `operator` are per-environment, so they are storage, set by initialize().
+///
+///      initialize() is deliberately not access-controlled: the factory calls it in the same
+///      transaction as the clone, so no uninitialized clone is ever observable, and anyone cloning
+///      the implementation themselves is creating their own contract rather than claiming one of
+///      ours. What makes an instance *ours* is the factory's attestation, not who called initialize.
 contract MidcurveTreasury is IMidcurveTreasury {
     using SafeERC20 for IERC20;
 
@@ -18,8 +34,11 @@ contract MidcurveTreasury is IMidcurveTreasury {
     // State
     // ============================================================================
 
+    /// @dev admin and _initialized share slot 0 (20 bytes + 1 byte).
     address public admin;
+    bool private _initialized;
     address public operator;
+
     IMidcurveSwapRouter public immutable swapRouter;
     address public immutable weth;
 
@@ -38,23 +57,33 @@ contract MidcurveTreasury is IMidcurveTreasury {
     }
 
     // ============================================================================
-    // Constructor
+    // Constructor / Initializer
     // ============================================================================
 
-    /// @param admin_ Initial admin address
-    /// @param operator_ Operator wallet that receives ETH from refueling
+    /// @notice Deploy the implementation for one chain.
     /// @param swapRouter_ MidcurveSwapRouter address for token-to-WETH swaps
     /// @param weth_ WETH contract address
-    constructor(address admin_, address operator_, address swapRouter_, address weth_) {
-        if (admin_ == address(0)) revert ZeroAddress();
-        if (operator_ == address(0)) revert ZeroAddress();
+    constructor(address swapRouter_, address weth_) {
         if (swapRouter_ == address(0)) revert ZeroAddress();
         if (weth_ == address(0)) revert ZeroAddress();
 
-        admin = admin_;
-        operator = operator_;
         swapRouter = IMidcurveSwapRouter(swapRouter_);
         weth = weth_;
+
+        // The implementation is never a treasury. Marking it initialized here means nobody can
+        // adopt it by calling initialize() on it directly.
+        _initialized = true;
+    }
+
+    /// @inheritdoc IMidcurveTreasury
+    function initialize(address admin_, address operator_) external {
+        if (_initialized) revert AlreadyInitialized();
+        if (admin_ == address(0)) revert ZeroAddress();
+        if (operator_ == address(0)) revert ZeroAddress();
+
+        _initialized = true;
+        admin = admin_;
+        operator = operator_;
     }
 
     // ============================================================================
