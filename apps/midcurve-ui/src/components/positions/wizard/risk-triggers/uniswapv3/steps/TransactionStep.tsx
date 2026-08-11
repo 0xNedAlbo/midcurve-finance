@@ -26,8 +26,10 @@ import { EvmWalletConnectionPrompt } from '@/components/common/EvmWalletConnecti
 import { EvmSwitchNetworkPrompt } from '@/components/common/EvmSwitchNetworkPrompt';
 import { useEvmTransactionPrompt } from '@/components/common/EvmTransactionPrompt';
 import { useOperatorApproval } from '@/hooks/automation/useOperatorApproval';
+import { useGasReadiness } from '@/hooks/automation/useGasReadiness';
 import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/automation/useMulticallPositionCloser';
 import { useSharedContract } from '@/hooks/automation/useSharedContract';
+import { useGasReadinessSteps } from '@/components/positions/automation/gas-readiness';
 import { useConfig } from '@/providers/ConfigProvider';
 import { getChainSlugByChainId } from '@/config/chains';
 import { apiClientFn } from '@/lib/api-client';
@@ -159,10 +161,41 @@ export function TransactionStep() {
   }, [state.takeProfit, state.discoveredPool, tokenInfo]);
 
   // ----- Determine if NFPM approval is needed -----
+  // Approval is a create-only concern: an existing order already has it.
   const needsApproval = useMemo(() => {
     const needsCreate = slOperation === 'CREATE' || tpOperation === 'CREATE';
     return needsCreate && !operatorApproval.isApproved;
   }, [slOperation, tpOperation, operatorApproval.isApproved]);
+
+  // ----- Gas readiness gate -----
+  // Gated on create AND edit, not create alone. Changing a trigger tick or a
+  // swap intent is the user asserting this order should fire — and it is the
+  // likelier moment for the gate to matter, since "treasury registered,
+  // operator empty" is the steady state and a user managing positions over
+  // months edits far more often than they register a first order on a chain.
+  // Gating creates only would leave the one surface that can report an
+  // unfunded operator silent for everyone past their first order per chain.
+  //
+  // Only a pure cancel is exempt: removing an order needs no automation gas.
+  const leavesAnOrderActive =
+    slOperation === 'CREATE' ||
+    slOperation === 'UPDATE' ||
+    tpOperation === 'CREATE' ||
+    tpOperation === 'UPDATE' ||
+    (slSwapChanged && state.stopLoss.enabled) ||
+    (tpSwapChanged && state.takeProfit.enabled);
+
+  // A failed read leaves `readiness` null and the gate renders nothing — the
+  // registration below must never be blocked by it.
+  const { readiness: gasReadiness } = useGasReadiness(
+    chainId || undefined,
+    connectedAddress,
+  );
+  const gasReadinessSteps = useGasReadinessSteps({
+    chainId,
+    readiness: gasReadiness,
+    leavesAnOrderActive,
+  });
 
   // ----- Build sub-operation labels (for display) -----
   const subOperations = useMemo((): SubOperation[] => {
@@ -698,6 +731,7 @@ export function TransactionStep() {
         </h3>
         <div className="space-y-3">
           {(needsApproval || approvalDone) && approvalPrompt.element}
+          {gasReadinessSteps.element}
           {renderMulticallRow()}
 
           {/* Confirm close order events via API */}

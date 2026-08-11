@@ -10,7 +10,6 @@ import {
 import { PoolSelectionStep } from './steps/PoolSelectionStep';
 import { PositionConfigStep } from './steps/PositionConfigStep';
 import { SwapStep } from './steps/SwapStep';
-import { AutowalletStep } from './steps/AutowalletStep';
 import { TransactionStep } from './steps/TransactionStep';
 import { SummaryStep } from './steps/SummaryStep';
 
@@ -27,11 +26,6 @@ function PositionConfigStepRenderer() {
 
 function SwapStepRenderer() {
   const content = SwapStep();
-  return <StepRenderer content={content} />;
-}
-
-function AutowalletStepRenderer() {
-  const content = AutowalletStep();
   return <StepRenderer content={content} />;
 }
 
@@ -181,8 +175,6 @@ function CreatePositionWizardContent() {
       return <PositionConfigStepRenderer />;
     case 'swap':
       return <SwapStepRenderer />;
-    case 'autowallet':
-      return <AutowalletStepRenderer />;
     case 'transactions':
       return <TransactionStepRenderer />;
     case 'summary':

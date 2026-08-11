@@ -35,6 +35,8 @@ import {
   type VaultPositionCloserCall,
 } from '@/hooks/automation/useMulticallVaultPositionCloser';
 import { useVaultSharedContract } from '@/hooks/automation/useVaultSharedContract';
+import { useGasReadiness } from '@/hooks/automation/useGasReadiness';
+import { useGasReadinessSteps } from '@/components/positions/automation/gas-readiness';
 import { useConfig } from '@/providers/ConfigProvider';
 import { getChainSlugByChainId } from '@/config/chains';
 import { useUniswapV3VaultRefreshPosition } from '@/hooks/positions/uniswapv3-vault/useUniswapV3VaultRefreshPosition';
@@ -131,6 +133,34 @@ export function TransactionStep() {
   });
 
   const needsApproval = needsCreate && !erc20Approval.isApproved;
+
+  // ----- Gas readiness gate -----
+  // Gated on create AND edit, not create alone. Changing a trigger tick or a
+  // swap intent is the user asserting this order should fire — and it is the
+  // likelier moment for the gate to matter, since "treasury registered,
+  // operator empty" is the steady state and a user managing positions over
+  // months edits far more often than they register a first order on a chain.
+  //
+  // Only a pure cancel is exempt: removing an order needs no automation gas.
+  const leavesAnOrderActive =
+    slOperation === 'CREATE' ||
+    slOperation === 'UPDATE' ||
+    tpOperation === 'CREATE' ||
+    tpOperation === 'UPDATE' ||
+    (slSwapChanged && state.stopLoss.enabled) ||
+    (tpSwapChanged && state.takeProfit.enabled);
+
+  // A failed read leaves `readiness` null and the gate renders nothing — the
+  // registration below must never be blocked by it.
+  const { readiness: gasReadiness } = useGasReadiness(
+    chainId || undefined,
+    connectedAddress,
+  );
+  const gasReadinessSteps = useGasReadinessSteps({
+    chainId,
+    readiness: gasReadiness,
+    leavesAnOrderActive,
+  });
 
   // ----- Compute trigger ticks -----
   const currentSlTick = useMemo(() => {
@@ -693,6 +723,7 @@ export function TransactionStep() {
         </h3>
         <div className="space-y-3">
           {(needsApproval || approvalDone) && erc20Approval.element}
+          {gasReadinessSteps.element}
           {renderMulticallRow()}
 
           {/* Confirm close order events via API */}

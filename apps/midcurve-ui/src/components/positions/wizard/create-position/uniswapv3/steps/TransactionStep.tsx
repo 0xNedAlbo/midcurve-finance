@@ -32,6 +32,8 @@ import { useMulticallPositionCloser, type PositionCloserCall } from '@/hooks/aut
 import { useDiscoverPool } from '@/hooks/pools/useDiscoverPool';
 import { SwapDirection } from '@/config/automation-contracts';
 import { useChainSharedContract } from '@/hooks/automation/useChainSharedContract';
+import { useGasReadiness } from '@/hooks/automation/useGasReadiness';
+import { useGasReadinessSteps } from '@/components/positions/automation/gas-readiness';
 import { getChainSlugByChainId } from '@/config/chains';
 import { apiClientFn } from '@/lib/api-client';
 import { AddToPortfolioSection } from '../shared/AddToPortfolioSection';
@@ -103,6 +105,19 @@ export function TransactionStep() {
 
   // Determine if automation is enabled
   const hasAutomation = state.automationEnabled && (state.stopLossEnabled || state.takeProfitEnabled);
+
+  // ----- Gas readiness gate -----
+  // Whether this chain's automation can actually pay to execute the orders
+  // registered below. A failed read leaves `readiness` null and the gate
+  // renders nothing — registration must never be blocked by it.
+  const { readiness: gasReadiness } = useGasReadiness(chainId, walletAddress);
+  const gasReadinessSteps = useGasReadinessSteps({
+    chainId: chainId ?? 0,
+    readiness: gasReadiness,
+    // This wizard only ever creates, so "leaves an order active" is exactly
+    // "automation is enabled with at least one trigger".
+    leavesAnOrderActive: hasAutomation,
+  });
 
   // Determine base/quote token addresses and amounts
   // Use adjusted amounts if available (from PriceAdjustmentStep), otherwise fall back to allocated amounts
@@ -895,6 +910,9 @@ export function TransactionStep() {
 
           {/* NFT approval - rendered by hook */}
           {hasAutomation && nftApprovalPrompt.element}
+
+          {/* Gas readiness gate — precedes registration, never gates it */}
+          {gasReadinessSteps.element}
 
           {/* Order registration - rendered by hook */}
           {(state.stopLossEnabled || state.takeProfitEnabled) && registerOrdersPrompt.element}

@@ -71,6 +71,22 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # The MidcurveTreasury creation bytecode is deployed from the user's
+      # browser during gas-infrastructure kickstart, so it ships as a generated
+      # TypeScript constant (out/ is gitignored). A stale constant does not fail
+      # loudly — it deploys the wrong contract — so recompile and compare.
+      - name: Set up Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Verify generated treasury artifacts are current
+        run: |
+          cd apps/midcurve-contracts
+          forge build
+          pnpm gen:treasury-artifacts
+          cd ../..
+          git diff --exit-code -- packages/midcurve-shared/src/abis/midcurve-treasury/ \
+            || { echo "::error::MidcurveTreasury artifacts are stale. Run 'cd apps/midcurve-contracts && forge build && pnpm gen:treasury-artifacts' and commit the result."; exit 1; }
+
       - name: Test @midcurve/shared
         run: pnpm --filter @midcurve/shared test:run
 

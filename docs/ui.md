@@ -177,8 +177,11 @@ Navigates to [`/positions/create`](../apps/midcurve-ui/src/pages/CreatePositionP
 4. **Swap** — optional pre-deposit token swap to balance amounts
 5. **Risk Triggers** — optional initial close-order configuration
 6. **Summary** — review all settings
-7. **Transaction** — approval(s) → mint NFT → register close order(s)
-8. **Autowallet** — optional handoff so closes execute without user signing
+7. **Transaction** — approval(s) → mint NFT → gas readiness gate → register close order(s)
+
+There is no autowallet step. One was mocked up but never wired to anything and never rendered — `needsAutowallet` initialised to `false` and nothing ever set it `true` — and it was removed once the gas readiness gate replaced what it pretended to do. Close orders are executed by a single operator EOA per environment, not by a per-user wallet.
+
+The **gas readiness gate** in step 7 appears only when the chain's automation cannot pay for execution, and only when the wizard is about to register a new order. It is the same shared component used by both risk-triggers wizards ([`gas-readiness/`](../apps/midcurve-ui/src/components/positions/automation/gas-readiness/)), which is where the SL/TP buttons and the Automation tab's "Edit SL/TP Orders" link both land. See [Gas readiness](architecture.md#7-gas-readiness-close-order-execution-funding) in the architecture reference.
 
 This is **UniswapV3 NFT only** today — there is no parallel "Create Vault Position" wizard (vaults are deployed by an operator separately, then users *join* an existing vault via Option 3).
 
@@ -325,7 +328,7 @@ The pages below exist in the SPA but are **not** about positions and are deliber
 | Page | Route | Purpose | Future doc |
 |---|---|---|---|
 | [`HomePage`](../apps/midcurve-ui/src/pages/HomePage.tsx) | `/` | Landing page, sign-in entry, marketing copy | `auth-and-onboarding.md` |
-| [`SetupWizardPage`](../apps/midcurve-ui/src/pages/SetupWizardPage.tsx) | `/setup` (or auto-served when `configured == false`) | First-run admin wizard: WalletConnect project ID, operator address, allowlist | `auth-and-onboarding.md` |
+| [`SetupWizardPage`](../apps/midcurve-ui/src/pages/SetupWizardPage.tsx) | `/setup` (or auto-served when `configured == false`) | First-run admin wizard: Alchemy / The Graph / CoinGecko API keys, WalletConnect project ID, admin wallet address. It does **not** set the operator address — the signer service writes that on automation startup | `auth-and-onboarding.md` |
 | [`SystemConfigPage`](../apps/midcurve-ui/src/pages/SystemConfigPage.tsx) | `/system-config` | Admin: edit system config post-setup | `admin.md` |
 | [`WalletManagementPage`](../apps/midcurve-ui/src/pages/WalletManagementPage.tsx) | `/wallets` | User-side: link/unlink wallets to the account, set primary wallet | `auth-and-onboarding.md` |
 | [`ApiKeysPage`](../apps/midcurve-ui/src/pages/ApiKeysPage.tsx) | `/api-keys` | Create/revoke `mck_…` API keys for the MCP server and other clients | `mcp-and-api-keys.md` |

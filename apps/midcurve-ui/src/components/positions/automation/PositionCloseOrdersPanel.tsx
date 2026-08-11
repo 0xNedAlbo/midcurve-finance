@@ -4,6 +4,13 @@
  * Panel for position detail page showing:
  * - Active close orders for this position
  * - Loading and error states
+ *
+ * The "Edit SL/TP Orders" action NAVIGATES to the risk-triggers wizard; this
+ * panel never registers an order itself. That is load-bearing: the gas
+ * readiness gate lives in the wizard's final step, and "no entry point without
+ * the gate" holds only because this surface routes through it. If this panel
+ * ever gains inline registration, it needs the gate too — see
+ * gas-readiness/GasReadinessSteps.tsx.
  */
 
 import { AlertCircle, Loader2, Settings2, Shield } from 'lucide-react';

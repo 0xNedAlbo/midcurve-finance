@@ -7,7 +7,6 @@
 export { CloseOrderStatusBadge, getCloseOrderStatusLabel, isCloseOrderProcessing, canCancelCloseOrder, isCloseOrderTerminal } from './CloseOrderStatusBadge';
 export { CloseOrderCard } from './CloseOrderCard';
 export { PositionCloseOrdersPanel } from './PositionCloseOrdersPanel';
-export { CloseOrderModal, type CloseOrderModalProps, type CloseOrderFormData } from './CloseOrderModal';
 
 // Vault Close Orders Panel
 export { VaultCloseOrdersPanel } from './VaultCloseOrdersPanel';

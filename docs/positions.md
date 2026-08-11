@@ -230,9 +230,21 @@ inactive → monitoring → executing → ┬─→ executed   (success, termina
 
 The whole flow is one transaction. Slippage protection comes from the user-supplied `minAmountOut` derived from `slippageBps` plus current pool price (computed by `calculatePoolSwapMinAmountOut` in the executor).
 
-### Operator gas top-up
+### Who pays for execution
 
-The automation EOA (the wallet that submits close-order transactions) is kept funded across all chains by the `RefuelOperatorRule` in business-logic, which draws from the gas escrow contract. Without this rule, automation can't execute; with it, the user only deposits gas once per chain and forgets about it.
+Close-order execution is paid for by a **single operator EOA per environment**, out of its native balance on whichever chain the order lives. That address is `system_config['operator.address']`, created by the signer service on automation startup. There is no per-chain operator and no per-user contribution. Nothing in the execution path reads that balance before starting.
+
+Two things fund it, and both need setting up before either works:
+
+- **The gas readiness gate**, shown at the point of registering a close order. If the chain has no `MidcurveTreasury` registered, or the operator is below the chain's readiness threshold, the user is offered the missing steps: deploy the treasury, register it, transfer a fixed amount to the operator. See [Gas readiness](architecture.md#7-gas-readiness-close-order-execution-funding) in the architecture reference.
+- **`RefuelOperatorRule`** in business-logic, which swaps accrued treasury fees to ETH and sends them to the operator. It is inert until a `MidcurveTreasury` row exists — with none registered, `resolveFeeRecipient()` returns the zero address, `_applyFees` is a no-op, and nothing accrues.
+
+Two consequences worth stating plainly:
+
+- **The user may decline.** Registration is a user transaction against the closer contract and does not depend on any of this. An order registered on an unfunded chain sits on chain looking active and fails when it triggers. It carries no marker and no surface distinguishes it from a healthy one.
+- **`RefuelOperatorRule` does not pick up a newly registered treasury.** It queries `shared_contracts` once in `onStartup()` and skips schedule registration on zero rows, with no re-check. A treasury registered at runtime leaves the rule unscheduled until `midcurve-business-logic` restarts. Fee accrual is unaffected — `resolveFeeRecipient()` reads per execution.
+
+Funds sent to the operator are a contribution to the instance's ability to execute orders. They are not held for the user, not attributable to them, and not recoverable: the refund path was removed in March 2026 together with the per-user autowallet, and nothing replaced it.
 
 ### Wallet-set changes
 

@@ -84,3 +84,14 @@ export {
 // Operator Approval (setApprovalForAll on NFPM)
 export { useOperatorApproval, type UseOperatorApprovalResult } from './useOperatorApproval';
 
+// Gas Readiness (per-chain close-order execution funding)
+export { useGasReadiness, type UseGasReadinessResult } from './useGasReadiness';
+export {
+  useDeployTreasury,
+  useRegisterTreasury,
+  useFundOperator,
+  type UseDeployTreasuryResult,
+  type UseRegisterTreasuryResult,
+  type UseFundOperatorResult,
+} from './useGasReadinessTransactions';
+

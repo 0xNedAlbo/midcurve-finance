@@ -5,6 +5,13 @@
  * When order exists: 3-zone inline control (toggle monitoring | edit | cancel).
  *
  * Vault-specific: navigates to vault risk triggers route using vaultAddress.
+ *
+ * This button NAVIGATES to the risk-triggers wizard; it never registers an
+ * order itself. That is load-bearing: the gas readiness gate lives in the
+ * wizard's final step, and "no entry point without the gate" holds only
+ * because this surface routes through it. If this is ever changed to register
+ * inline, it needs the gate too — see
+ * components/positions/automation/gas-readiness/GasReadinessSteps.tsx.
  */
 
 'use client';

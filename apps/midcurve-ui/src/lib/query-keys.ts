@@ -206,6 +206,23 @@ export const queryKeys = {
     },
 
     // ---------------------------------------------------------------------------
+    // Gas Readiness (per-chain close-order execution funding)
+    // ---------------------------------------------------------------------------
+    gasReadiness: {
+      all: ['automation', 'gas-readiness'] as const,
+
+      // Keyed on the connected wallet too: the response carries that wallet's
+      // native balance, so two wallets on one chain are two different answers.
+      byChain: (chainId: number, walletAddress?: string) =>
+        [
+          ...queryKeys.automation.gasReadiness.all,
+          'chain',
+          chainId,
+          walletAddress ?? null,
+        ] as const,
+    },
+
+    // ---------------------------------------------------------------------------
     // Automation Logs
     // ---------------------------------------------------------------------------
     logs: {
