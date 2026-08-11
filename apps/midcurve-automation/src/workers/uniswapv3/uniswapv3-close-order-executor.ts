@@ -1104,10 +1104,27 @@ export class CloseOrderExecutor {
       operatorAddress,
     });
 
-    const txHash = await broadcastTransaction(
-      chainId as SupportedChainId,
-      signedTx.signedTransaction as `0x${string}`
-    );
+    // A broadcast that never lands leaves the allocated nonce spent with nothing on chain
+    // behind it, and every later transaction from the operator queues behind that gap.
+    // Hand it back rather than leaving it to the signer's staleness backstop, which is
+    // slower than this order's own retry budget.
+    let txHash: `0x${string}`;
+    try {
+      txHash = await broadcastTransaction(
+        chainId as SupportedChainId,
+        signedTx.signedTransaction as `0x${string}`
+      );
+    } catch (error) {
+      await signerClient.releaseNonce({ chainId, nonce: signedTx.nonce });
+      log.error({
+        orderId,
+        positionId,
+        nonce: signedTx.nonce,
+        error: error instanceof Error ? error.message : String(error),
+        msg: 'Broadcast failed; released the nonce so it does not block later transactions',
+      });
+      throw error;
+    }
 
     autoLog.orderExecution(log, orderId, 'waiting', { txHash });
 

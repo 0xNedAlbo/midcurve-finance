@@ -208,6 +208,18 @@ class SignerClient {
    * Each execution module (NFT, vault) encodes its own calldata using
    * its contract ABI and specifies the signer endpoint to call.
    */
+  /**
+   * Hand a nonce back when its transaction never reached the chain.
+   *
+   * A nonce that is allocated and never broadcast leaves a gap, and every later
+   * transaction from the operator EOA queues behind a number the chain will never see.
+   * Releasing it on a failed broadcast closes that immediately; the signer's staleness
+   * reset is the backstop for the case where this process dies first.
+   */
+  async releaseNonce(params: { chainId: number; nonce: number }): Promise<{ rolledBack: boolean }> {
+    return this.request<{ rolledBack: boolean }>('POST', '/api/operator/nonce/release', params);
+  }
+
   async signTransaction(params: {
     userId: string;
     chainId: number;

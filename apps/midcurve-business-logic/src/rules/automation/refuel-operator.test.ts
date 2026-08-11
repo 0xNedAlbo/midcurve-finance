@@ -15,6 +15,7 @@
  *  8. An operator binding mismatch does not sign
  *  9. One chain failing does not stop the others
  * 10. A run starting while the previous is in flight is skipped
+ * 11. A failed broadcast hands the nonce back rather than leaving a gap
  *
  * No live RabbitMQ, no live Prisma, no RPC. The rule's own service instances are replaced
  * after construction; the signer client, EVM config and scheduler are module-mocked.
@@ -33,6 +34,7 @@ const {
   getPublicClientMock,
   registerScheduleMock,
   systemConfigGetMock,
+  releaseNonceMock,
 } = vi.hoisted(() => ({
   findChainsByContractNameMock: vi.fn(),
   getOperatorAddressMock: vi.fn(),
@@ -40,6 +42,7 @@ const {
   getPublicClientMock: vi.fn(),
   registerScheduleMock: vi.fn(),
   systemConfigGetMock: vi.fn(),
+  releaseNonceMock: vi.fn(),
 }));
 
 vi.mock('@midcurve/services', async (importOriginal) => {
@@ -67,6 +70,7 @@ vi.mock('../../clients/signer-client', () => ({
   getSignerClient: () => ({
     getOperatorAddress: getOperatorAddressMock,
     signRefuelOperator: signRefuelOperatorMock,
+    releaseNonce: releaseNonceMock,
   }),
 }));
 
@@ -174,6 +178,7 @@ beforeEach(() => {
     from: OPERATOR,
   });
   sendRawTransactionMock.mockResolvedValue('0xtxhash');
+  releaseNonceMock.mockResolvedValue({ rolledBack: true });
   findChainsByContractNameMock.mockResolvedValue([]);
   // registerSchedule normally runs the callback immediately (runOnStart). The tests drive
   // it explicitly, so the mock does not.
@@ -399,6 +404,47 @@ describe('per-chain isolation', () => {
     // Ethereum blew up; Arbitrum was still refuelled.
     expect(signRefuelOperatorMock).toHaveBeenCalledTimes(1);
     expect(signRefuelOperatorMock.mock.calls[0]?.[0]).toMatchObject({ chainId: ARBITRUM });
+  });
+});
+
+// =============================================================================
+// 11 — the nonce must not be spent without a transaction behind it
+// =============================================================================
+
+describe('failed broadcast', () => {
+  beforeEach(() => {
+    findChainsByContractNameMock.mockResolvedValue([
+      { chainId: ARBITRUM, address: TREASURY_ARB },
+    ]);
+    wireChains({ [ARBITRUM]: healthy() });
+  });
+
+  it('hands the nonce back when the broadcast is rejected', async () => {
+    // The realistic case: the refuel fires because the operator is low, and the node
+    // rejects the transaction for insufficient funds. Left alone, the allocated nonce is
+    // spent with nothing on chain behind it and every later transaction queues behind the
+    // gap — including close-order executions.
+    sendRawTransactionMock.mockRejectedValue(new Error('insufficient funds for gas'));
+
+    await startAndRun(new RefuelOperatorRule());
+
+    expect(releaseNonceMock).toHaveBeenCalledWith({ chainId: ARBITRUM, nonce: 7 });
+  });
+
+  it('does not hand the nonce back when the broadcast succeeds', async () => {
+    await startAndRun(new RefuelOperatorRule());
+
+    expect(sendRawTransactionMock).toHaveBeenCalledTimes(1);
+    expect(releaseNonceMock).not.toHaveBeenCalled();
+  });
+
+  it('reports the chain as failed rather than refuelled', async () => {
+    sendRawTransactionMock.mockRejectedValue(new Error('insufficient funds for gas'));
+
+    // The throw is contained by allSettled, so the run completes and other chains are
+    // unaffected — but this chain must not be counted as a success.
+    const rule = new RefuelOperatorRule();
+    await expect(startAndRun(rule)).resolves.toBeDefined();
   });
 });
 

@@ -411,10 +411,25 @@ export class RefuelOperatorRule extends BusinessRule {
       chainNonce,
     });
 
-    // 7. Broadcast
-    const txHash = await publicClient.sendRawTransaction({
-      serializedTransaction: signed.signedTransaction as `0x${string}`,
-    });
+    // 7. Broadcast. On failure the nonce goes back, or it leaves a gap that blocks every
+    //    later transaction from this operator — close-order executions included. This is
+    //    the likeliest place for that to happen, since a refuel runs precisely when the
+    //    operator is low enough for a node to reject the transaction outright.
+    let txHash: `0x${string}`;
+    try {
+      txHash = await publicClient.sendRawTransaction({
+        serializedTransaction: signed.signedTransaction as `0x${string}`,
+      });
+    } catch (error) {
+      await signerClient.releaseNonce({ chainId, nonce: signed.nonce });
+      this.logger.error({
+        chainId,
+        nonce: signed.nonce,
+        error: error instanceof Error ? error.message : String(error),
+        msg: 'Refuel broadcast failed; released the nonce so it does not block later transactions',
+      });
+      throw error;
+    }
 
     this.logger.info({
       chainId,

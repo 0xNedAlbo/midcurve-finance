@@ -29,12 +29,27 @@
  *
  * `chainNonce` below the stored counter is the normal in-flight case — we have allocated
  * values that have not yet been mined — and is why the counter, not the chain, is the
- * authority. But it is also what a nonce allocated and never broadcast looks like, when a
- * caller dies between receiving a signature and sending it. That gap never heals on its
- * own: every later transaction queues behind a nonce the chain will never see. So a
- * counter that has been ahead of the chain for longer than STALE_AFTER_MS is treated as
- * stranded and reset down to the chain. Anything genuinely in flight during that window
- * would have moved `chainNonce` up as it mined.
+ * authority.
+ *
+ * ## Allocated but never broadcast
+ *
+ * The old caller-reads-the-chain behaviour was self-healing by accident: a signature that
+ * was never sent cost nothing, because the next caller re-read the same number. An
+ * allocator does not get that for free. A number spent without a transaction reaching the
+ * chain leaves a gap, and every later transaction queues behind it.
+ *
+ * That matters most exactly where it is most likely: the refuel fires *because* the
+ * operator is low, so a node rejecting the refuel for insufficient funds is a realistic
+ * way to spend a nonce and send nothing.
+ *
+ * Two mechanisms, in order of preference:
+ *
+ * 1. `release()` — the caller hands the number back when signing or broadcast fails. This
+ *    is the fast path and closes the gap immediately.
+ * 2. `STALE_AFTER_MS` — a counter that has sat ahead of the chain for longer than the
+ *    window is treated as stranded and reset down to it. This is the backstop for the case
+ *    release cannot cover: the caller dying between signature and broadcast. Anything
+ *    genuinely in flight during that window would have moved `chainNonce` up as it mined.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -49,9 +64,12 @@ import { signerLogger } from '@/lib/logger';
 /**
  * How long the counter may sit ahead of the chain before it is treated as stranded.
  *
- * Long enough that a slow-but-alive transaction is never reset out from under itself —
- * the executor's own retry budget is three attempts sixty seconds apart — and short
- * enough that a dropped allocation does not wedge the EOA until someone notices.
+ * This is the backstop, not the primary recovery — release() is. It has to be long enough
+ * that a slow-but-alive transaction is never reset out from under itself, which would
+ * reintroduce exactly the double-spend of a nonce this service exists to prevent. A
+ * transaction can legitimately sit pending for minutes on L1, so the window is generous;
+ * the cost of being generous is bounded because release() handles the common failure
+ * directly rather than waiting this out.
  */
 const STALE_AFTER_MS = 15 * 60 * 1000;
 
@@ -178,6 +196,59 @@ class OperatorNonceServiceImpl {
     });
 
     return { nonce, wasReset };
+  }
+
+  /**
+   * Hand a nonce back after signing or broadcast failed, so it is reused rather than
+   * leaving a gap the chain will never fill.
+   *
+   * Rolls back only when the released nonce is the most recent allocation — that is the
+   * only case where rolling back cannot step on someone else. If another allocation
+   * happened in between, the counter is left alone: reusing a number that a live
+   * transaction is already carrying is the failure this service exists to prevent, and a
+   * gap is the lesser of the two. The staleness reset in allocate() is what clears that
+   * case, once the chain has demonstrably not moved.
+   *
+   * Best-effort by nature. A caller that dies before calling this leaves the gap to the
+   * staleness path, which is why both exist.
+   *
+   * @returns whether the counter was actually rolled back
+   */
+  async release(input: {
+    chainId: number;
+    address: string;
+    nonce: number;
+  }): Promise<{ rolledBack: boolean }> {
+    const { chainId, nonce } = input;
+    const address = normalizeAddress(input.address);
+
+    const rowsAffected = await prisma.$executeRaw`
+      UPDATE "public"."operator_nonces"
+      SET "nextNonce" = ${nonce}, "updatedAt" = NOW()
+      WHERE "chainId" = ${chainId}
+        AND "address" = ${address}
+        AND "nextNonce" = ${nonce} + 1
+    `;
+
+    const rolledBack = rowsAffected > 0;
+
+    if (rolledBack) {
+      this.logger.info({
+        chainId,
+        address,
+        nonce,
+        msg: 'Released unbroadcast operator nonce; it will be reused by the next signing',
+      });
+    } else {
+      this.logger.warn({
+        chainId,
+        address,
+        nonce,
+        msg: 'Could not release operator nonce — a later allocation already took its place. The gap clears via the staleness reset once the chain has not moved.',
+      });
+    }
+
+    return { rolledBack };
   }
 }
 

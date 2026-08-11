@@ -107,6 +107,18 @@ class SignerClient {
   async signRefuelOperator(params: SignRefuelOperatorParams): Promise<SignedTransaction> {
     return this.request<SignedTransaction>('POST', '/api/sign/automation/treasury/refuel-operator', params);
   }
+
+  /**
+   * Hand a nonce back when its transaction never reached the chain.
+   *
+   * Matters most here: the refuel fires because the operator is low on gas, so a node
+   * rejecting the broadcast for insufficient funds is exactly when a nonce gets spent
+   * without a transaction to show for it. Left alone, that gap blocks every later
+   * transaction from the operator EOA, including close-order executions.
+   */
+  async releaseNonce(params: { chainId: number; nonce: number }): Promise<{ rolledBack: boolean }> {
+    return this.request<{ rolledBack: boolean }>('POST', '/api/operator/nonce/release', params);
+  }
 }
 
 // =============================================================================
