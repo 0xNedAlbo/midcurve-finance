@@ -10,6 +10,10 @@
     "UniswapV3VaultFactory": "0xB9605C30d5e68D535d45E663cfA06A429AA83A3b",
     "UniswapV3VaultPositionCloser": "0x13d13B15BbE9b06C0279a7aB5f0a898EA3f25A40",
     "UniswapV3StakingVault": "0x7f8b35eafF873Dabb70aFe027949e79884b2dB88",
-    "UniswapV3StakingVaultFactory": "0x2Cc277Cd2CF5d78F18f0627a1DA2aA48b7C57EB1"
+    "UniswapV3StakingVaultFactory": "0x2Cc277Cd2CF5d78F18f0627a1DA2aA48b7C57EB1",
+    "MidcurveTreasuryFactory": "0x149D95421d41D6Fc751f281F04B9a4e8F04255f9"
+  },
+  "references": {
+    "MidcurveTreasuryImplementation": "0xC2CA6061b5EC43038338694528c58F9394014984"
   }
 }
