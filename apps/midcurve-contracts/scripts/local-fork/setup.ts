@@ -76,6 +76,10 @@ interface SetupState {
   uniswapV3AdapterAddress?: string;
   swapRouterContractId?: string;
   swapRouterContractHash?: string;
+  treasuryImplementationAddress?: string;
+  treasuryFactoryAddress?: string;
+  treasuryFactoryContractId?: string;
+  treasuryFactoryContractHash?: string;
 }
 
 async function runCommand(
@@ -233,6 +237,11 @@ async function step1Deploy(state: SetupState): Promise<void> {
   state.feeCollectorAddress = extractAddress(output, /FeeCollector deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.swapRouterAddress = extractAddress(output, /MidcurveSwapRouter deployed at:\s*(0x[a-fA-F0-9]{40})/);
   state.uniswapV3AdapterAddress = extractAddress(output, /UniswapV3Adapter deployed at:\s*(0x[a-fA-F0-9]{40})/);
+  state.treasuryImplementationAddress = extractAddress(
+    output,
+    /MidcurveTreasuryImplementation deployed at:\s*(0x[a-fA-F0-9]{40})/
+  );
+  state.treasuryFactoryAddress = extractAddress(output, /MidcurveTreasuryFactory deployed at:\s*(0x[a-fA-F0-9]{40})/);
 
   if (!state.mockUsdAddress) {
     throw new Error('Failed to extract MockUSD address from deploy output');
@@ -487,6 +496,38 @@ async function step5StoreSharedContract(state: SetupState): Promise<void> {
   } else {
     console.log('SwapRouter not deployed - skipping database storage');
   }
+
+  // Store TreasuryFactory in database.
+  //
+  // Only the factory. The implementation is the delegatecall target for every
+  // clone, never a treasury — registering it would make it the fee recipient,
+  // and its admin is address(0).
+  if (state.treasuryFactoryAddress) {
+    try {
+      const treasuryFactoryResult = await sharedContractService.upsert({
+        sharedContractType: SharedContractTypeEnum.EVM_SMART_CONTRACT,
+        sharedContractName: SharedContractNameEnum.MIDCURVE_TREASURY_FACTORY,
+        interfaceVersionMajor: 1,
+        interfaceVersionMinor: 0,
+        chainId: LOCAL_CHAIN_ID,
+        address: state.treasuryFactoryAddress,
+        isActive: true,
+      });
+
+      state.treasuryFactoryContractId = treasuryFactoryResult.id;
+      state.treasuryFactoryContractHash = treasuryFactoryResult.sharedContractHash;
+
+      console.log('SharedContract upserted (TreasuryFactory):');
+      console.log('  ID:', treasuryFactoryResult.id);
+      console.log('  Hash:', treasuryFactoryResult.sharedContractHash);
+      console.log('  Address:', treasuryFactoryResult.config.address);
+    } catch (error) {
+      console.error('Failed to store TreasuryFactory SharedContract:', error);
+      throw error;
+    }
+  } else {
+    console.log('TreasuryFactory not deployed - skipping database storage');
+  }
 }
 
 async function main(): Promise<void> {
@@ -543,6 +584,8 @@ async function main(): Promise<void> {
     }
     console.log('  MidcurveSwapRouter:', state.swapRouterAddress || '(not deployed)');
     console.log('  UniswapV3Adapter:', state.uniswapV3AdapterAddress || '(not deployed)');
+    console.log('  MidcurveTreasury (impl):', state.treasuryImplementationAddress || '(not deployed)');
+    console.log('  MidcurveTreasuryFactory:', state.treasuryFactoryAddress || '(not deployed)');
     console.log('  Pool:', state.poolAddress);
     console.log('');
     if (state.sharedContractId) {

@@ -35,6 +35,9 @@ import {DiamondInit as FcDiamondInit} from "../contracts/fee-collector/init/Diam
 
 // SwapRouter
 import {MidcurveSwapRouter} from "../contracts/swap-router/MidcurveSwapRouter.sol";
+// Treasury
+import {MidcurveTreasury} from "../contracts/treasury/MidcurveTreasury.sol";
+import {MidcurveTreasuryFactory} from "../contracts/treasury/MidcurveTreasuryFactory.sol";
 import {UniswapV3Adapter} from "../contracts/swap-router/adapters/UniswapV3Adapter.sol";
 
 /**
@@ -106,6 +109,22 @@ contract DeployLocalScript is Script {
         // exercise multi-hop path validation.
         midcurveSwapRouter.addSwapToken(WETH);
         midcurveSwapRouter.addSwapToken(USDC);
+
+        // ========================================
+        // 2b. Deploy MidcurveTreasury implementation + factory
+        // ========================================
+        // Publisher infrastructure on real chains, deployed here so the gas
+        // readiness gate is exercisable locally. Without a registered factory
+        // the local chain reports `no-treasury-factory` and the kickstart flow
+        // — the only place it can be tried at all — goes dark.
+        console.log("");
+        console.log("--- Deploying MidcurveTreasury factory ---");
+
+        MidcurveTreasury treasuryImpl = new MidcurveTreasury(address(midcurveSwapRouter), WETH);
+        console.log("MidcurveTreasuryImplementation deployed at:", address(treasuryImpl));
+
+        MidcurveTreasuryFactory treasuryFactory = new MidcurveTreasuryFactory(address(treasuryImpl));
+        console.log("MidcurveTreasuryFactory deployed at:", address(treasuryFactory));
 
         // ========================================
         // 3. Deploy PositionCloser Diamond

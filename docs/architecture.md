@@ -631,7 +631,8 @@ Diamond variant tailored for vault-held positions; uses the same facet model (`R
 Diamond contract for collecting and distributing protocol fees. Facets: `CollectRegistrationFacet`, `CollectExecutionFacet`, `CollectViewFacet`, `CollectOwnerUpdateFacet`, `MulticallFacet`, `VersionFacet`.
 
 **Treasury (`contracts/treasury/`):**
-- `MidcurveTreasury.sol` - Holds protocol-owned assets; integrates with WETH wrapping helper (`IWETH`).
+- `MidcurveTreasury.sol` - Holds protocol-owned assets; integrates with WETH wrapping helper (`IWETH`). Deployed as an EIP-1167 clone, one per environment per chain. `swapRouter` and `weth` are implementation immutables (chain facts, read through the delegatecall); `admin` and `operator` are storage, set by `initialize()`.
+- `MidcurveTreasuryFactory.sol` - Clones and initializes instances in one transaction. Publisher infrastructure: one per chain, verified once. Attests provenance via `isTreasury()` and indexes instances by admin via `treasuriesOf()`.
 
 **Swap Router (`contracts/swap-router/`, DEX Aggregator):**
 - `MidcurveSwapRouter.sol` - Main router with `sell()` function
@@ -1037,23 +1038,32 @@ Close orders are the only thing in the system that acts without the user present
 | `needs-topup` | Treasury registered, operator below threshold | fund |
 | `unavailable` | The chain cannot host one at all | one non-actionable line |
 
-`unavailable` covers a missing `MidcurveSwapRouter` row (the treasury constructor takes its address), a missing `admin_wallet_address`, a missing operator address, and a chain with no readiness numbers. It performs no chain reads.
+`unavailable` covers a missing `MidcurveSwapRouter` row, a missing `MidcurveTreasuryFactory` row (nothing can deploy an instance), a missing `admin_wallet_address`, a missing operator address, and a chain with no readiness numbers. It performs no chain reads.
 
 **Where it appears.** Three components, one shared implementation: the create-position wizard's execute step and both risk-triggers wizards (NFT and vault). The SL/TP buttons on the position card and the Automation tab's "Edit SL/TP Orders" link navigate into a risk-triggers wizard rather than registering inline, which is what makes "no entry point without the gate" hold. That property depends on those surfaces continuing to navigate; the components say so in their docblocks.
 
-**Deployment.** `MidcurveTreasury` is deployed by the connected user as a plain contract creation — creation bytecode plus ABI-encoded constructor arguments, no `to`. The address is learned from the transaction-status subscription, which already reports `contractAddress` for contract creations, so the frontend still performs no RPC reads. `admin` is the environment's configured admin, never the deploying user, so no user gains control over the treasury's funds by kickstarting a chain.
+**Deployment.** The connected user calls `createTreasury(admin, operator)` on the chain's `MidcurveTreasuryFactory`, which clones the chain's `MidcurveTreasury` implementation as an EIP-1167 minimal proxy and initializes it in the same transaction. `admin` is the environment's configured admin, never the deploying user, so no user gains control over the treasury's funds by kickstarting a chain.
 
-The creation bytecode ships as a generated TypeScript constant in `@midcurve/shared` because `out/` is gitignored; CI recompiles and fails on drift.
+The factory and implementation are publisher infrastructure, exactly like the position closers: deployed and verified once per chain, recorded in `deployments/*.json`, seeded into `shared_contracts`. Only the factory is seeded — `seed-contracts.ts` *throws* on `MidcurveTreasury` and `MidcurveTreasuryImplementation`, because registering the implementation would make it the fee recipient and its `admin` is `address(0)`. Record the implementation under `references` rather than `contracts`.
 
-**Duplicates and orphans are tolerated.** The address is not predictable, so a browser that dies between the wallet confirming and the registration call leaves a deployed, unrecorded treasury, and a later attempt deploys another. That is accepted rather than engineered around: `sweep()` and `rescueEth()` are `onlyAdmin` and the admin address is environment configuration, so an orphaned treasury holds funds the admin can still retrieve. What must hold is narrower — **once the `shared_contracts` row exists it is the single source of truth**, and a chain with a registered treasury never offers a deploy again.
+**Why a proxy: the explorer is the administrative surface.** The treasury has no administrative surface in Midcurve by decision — `sweep()`, `rescueEth()`, `setOperator()` and `transferAdmin()` have no UI, no API route and no script. That only works if the block explorer offers them, which requires the contract to be verified there. A raw `CREATE` from the browser lands at an unpredictable address that nobody will ever verify. Etherscan-family explorers resolve an EIP-1167 clone to its implementation and serve the implementation's verified source and ABI at the clone's address, so verifying the implementation once per chain gives every instance a working Read/Write surface. Confirmed against live vault clones on Arbitrum, Base and Ethereum, none of which was ever verified individually.
 
-Recovering an orphan means finding its address in the deployer's transaction history. Nothing lists deployed treasuries.
+**Identity is attested, not derived.** The clone is deployed with CREATE2 at a salt of `keccak256(admin, operator)`, so the backend knows the address before the transaction is sent and carries it in the readiness response as `expectedAddress`. Nothing reads it back out of a receipt.
 
-**Registration is verified, not trusted.** The address comes from the client, so `registerTreasury` reads `admin()`, `operator()`, `weth()` and `swapRouter()` off the candidate and rejects anything that is not what this environment would have deployed. A caller cannot register an address of their choosing.
+That prediction is a deploy-time convenience and **must not be used as an identity test**. The salt depends on the operator, so the predicted address moves the moment `setOperator()` is called — and that call is the repair for a stale operator binding (#125). Provenance is `factory.isTreasury(address)`, written once at creation and never cleared, so a repaired treasury stays registrable. `factory.treasuriesOf(admin)` serves the same independence for discovery.
+
+**Duplicates and orphans are now recoverable rather than tolerated.** `createTreasury` is idempotent — a second call with the same arguments returns the existing instance. A browser that dies between the deploy confirming and the registration call leaves a treasury that the next readiness read finds, at the expected address or, once the operator has rotated, through the factory's admin index; the flow then offers registration alone. `TreasuryDeployed` makes instances discoverable from chain data. What still holds unchanged: **once the `shared_contracts` row exists it is the single source of truth**, and a chain with a registered treasury never offers a deploy again.
+
+**Registration is verified, not trusted.** The address comes from the client, so `registerTreasury` requires the chain's factory to attest it (`isTreasury`) and reads `admin()`, `operator()`, `weth()` and `swapRouter()` off the candidate, rejecting anything that is not what this environment would have deployed. A caller cannot register an address of their choosing.
 
 **Declining is permitted and unmarked.** Registration is a user transaction against the closer contract and does not depend on any of this. The gate never blocks it — there is no decline button, because leaving the gate's rows untouched already is the decline. The resulting order sits on chain looking active and fails when it triggers, carries no marker, and no surface distinguishes it from a healthy one. A failed readiness read fails open for the same reason: blocking registration would be worse than the decline the design already permits.
 
-**Operator binding drift.** A registered treasury bound to an operator other than the current one still lets executions run — those are paid by the operator EOA directly — but its accrued fees would refuel an address nobody signs with. The readiness read reports this and logs it at warn level; it is not surfaced to the user, who has no action available for it. Rotating the operator key is the way to produce it; see the note on key recreation in the close-order path.
+**Binding drift, both directions.** Every readiness read compares the registered treasury's `admin()` and `operator()` against this environment's configured values. Both are logged at warn level and neither is surfaced to the user, who has no action available for either.
+
+- **Operator drift** still lets executions run — those are paid by the operator EOA directly — but accrued fees would refuel an address nobody signs with. Rotating the operator key produces it; see the note on key recreation in the close-order path. The repair is `setOperator()` from the explorer.
+- **Admin drift** is the heavier one: nobody in this environment can sweep the treasury at all, while fees keep accruing into it. `transferAdmin()` produces it, and the repair is to update `admin_wallet_address` to match. Registration rejects the mismatch in both directions, which is correct — a treasury whose admin is not this environment's is not this environment's treasury.
+
+Neither condition announces itself, which is why both are checked on every read rather than only at registration.
 
 ---
 
