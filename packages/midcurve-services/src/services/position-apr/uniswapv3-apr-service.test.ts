@@ -15,6 +15,15 @@ import type { PrismaClient } from '@midcurve/database';
  *
  * Every expectation below depends on `asOf`. Each test states it explicitly via
  * `vi.setSystemTime` rather than relying on the ambient clock.
+ *
+ * Known limit of this suite: every case sets `params.costBasis` to the last
+ * event's `costBasisAfter`, so the two sources the window draws on agree by
+ * construction. In production they need not — the position aggregate and the
+ * ledger's running total are written by different paths, and on the position
+ * reported in #135 the displayed cost basis and the sum of the displayed event
+ * values differ by a cent. The window's closing snapshot takes the aggregate
+ * and every earlier snapshot takes the ledger, so a divergence between them
+ * would land entirely on the final segment. Nothing here would see it.
  */
 
 const t = (iso: string) => new Date(iso);
@@ -255,7 +264,11 @@ describe('UniswapV3AprService.calculateSummary — unrealized denominator', () =
     expect(summary.realizedActiveDays).toBeGreaterThan(0);
   });
 
-  it('excludes events that fall outside the user\'s ownership', async () => {
+  it('asks the database to filter out events outside the user\'s ownership', async () => {
+    // The exclusion happens in the query, so this pins the filter rather than
+    // the behaviour: a mock returning rows cannot demonstrate rows being left
+    // behind. Read as "the where clause is still there", not as coverage of
+    // ignored events being kept out of the weighting.
     vi.setSystemTime(t('2026-08-12T10:57:03Z'));
     eventFindMany.mockResolvedValue([
       ledgerRow(t('2026-07-22T10:22:17Z'), 49999_990000n, 100),

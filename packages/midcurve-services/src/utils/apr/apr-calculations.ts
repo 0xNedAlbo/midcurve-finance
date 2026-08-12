@@ -382,6 +382,15 @@ export function buildUnrealizedWindowSnapshots(
 
   // Close the window at `asOf`. Events sharing the final timestamp keep their
   // zero-length segments, which contribute no weight and no duration.
+  //
+  // When `asOf` precedes the last event — a block timestamp running ahead of
+  // wall clock — the closing snapshot is omitted rather than appended, because
+  // appending it would hand `calculateTimeWeightedCostBasis` a backwards
+  // segment and throw. The cost is that the weighted window then extends past
+  // `asOf` while the caller's day count still stops there, so the two cover
+  // slightly different spans. That mismatch is preferred to failing the whole
+  // summary over a clock the position does not control, and it lasts only
+  // until wall clock passes the block timestamp.
   const lastTimestamp = snapshots[snapshots.length - 1]!.timestamp.getTime();
   if (asOf.getTime() > lastTimestamp) {
     snapshots.push({ timestamp: asOf, costBasisAfter: currentCostBasis });
