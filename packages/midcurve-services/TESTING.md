@@ -39,10 +39,14 @@ with every other workspace suite. This package is not named in
 and [`test-manifest.json`](../../test-manifest.json) fails the build if a
 package gains or loses a suite without being recorded.
 
-`pnpm test:coverage` exists but is not run in CI, and it will fail on a
-fresh clone: it passes `--env-file=.env.test`, and `.env.test` is
-git-ignored. Left as-is by #91 rather than quietly fixed — it is the same
-shape as the scripts that issue removed, and it deserves its own decision.
+`pnpm test:coverage` produces a coverage report. It is not run in CI.
+
+It used to pass `--env-file=.env.test` against a git-ignored file, so it
+failed on any clone but its author's. #91 removed that: no test in this
+package reads an environment variable, so the flag was a leftover of the
+integration split described below rather than something the script needed.
+The same change added `@vitest/coverage-v8`, which nothing in the workspace
+had ever declared — the script had two independent reasons not to run.
 
 ## Writing one
 
