@@ -23,7 +23,8 @@
     "dev:api": "turbo run dev --filter=@midcurve/api",
     "dev:signer": "turbo run dev --filter=@midcurve/signer",
     "dev:business-logic": "turbo run dev --filter=@midcurve/business-logic",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "check:test-manifest": "node scripts/check-test-manifest.mjs"
   },
   "author": "",
   "license": "MIT",

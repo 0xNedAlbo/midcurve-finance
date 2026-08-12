@@ -54,6 +54,26 @@ verifies clean.
 Both facts in [docs/architecture.md](docs/architecture.md), "Verifying the
 migration chain".
 
+## Tests in CI
+
+CI runs `pnpm -r test:run` plus the Solidity suite — it does **not** name
+packages. Membership follows the `test:run` script, so a package without one
+is skipped silently.
+
+[`test-manifest.json`](test-manifest.json) is what makes that silence loud:
+every workspace package is recorded as `vitest`, `forge` or `none`, and a
+`none` needs a stated reason. `pnpm check:test-manifest` fails the build when
+the manifest and the workspace disagree.
+
+**Adding a package, or adding or removing a test suite, means editing that
+file** — CI will stop you if you forget. Two cases it catches that the
+recursive run cannot see on its own: a package holding `*.test.ts` with no
+script (they run nowhere), and a Next.js package whose vitest config does not
+bound `include` — `.next/standalone/` contains copies of other packages'
+sources and is *not* in vitest's default `exclude`.
+
+Rationale and the failures behind each check: [#91](https://github.com/0xNedAlbo/midcurve-finance/issues/91).
+
 ## Architecture Docs
 For detailed architecture, auth flows, and design decisions:
 see [docs/architecture.md](docs/architecture.md) and package-level CLAUDE.md files.

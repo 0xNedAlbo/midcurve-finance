@@ -533,10 +533,9 @@ npm test
 
 # Single run (CI/CD)
 npm run test:run
-
-# With coverage report
-npm run test:coverage
 ```
+
+There is no coverage script — see [TESTING.md](./TESTING.md).
 
 ### Writing Tests
 
@@ -1136,9 +1135,8 @@ npm run type-check   # Check types without build
 npm run build        # Production build
 
 # Testing
-npm test             # Watch mode (121+ tests)
+npm test             # Watch mode
 npm run test:run     # Single run
-npm run test:coverage # With coverage
 
 # Prisma
 npm run prisma:generate  # Generate Prisma client

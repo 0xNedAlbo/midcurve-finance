@@ -10,9 +10,7 @@
     "build": "next build --webpack",
     "start": "next start --webpack -p 3001",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "test:api": "vitest",
-    "test:api:run": "vitest run"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@midcurve/api-shared": "workspace:^",
@@ -39,8 +37,7 @@
     "eslint": "^9",
     "eslint-config-next": "^16.0.0",
     "pino-pretty": "^13.1.2",
-    "typescript": "^5",
-    "vitest": "^3.2.4"
+    "typescript": "^5"
   },
   "engines": {
     "node": ">=20"
