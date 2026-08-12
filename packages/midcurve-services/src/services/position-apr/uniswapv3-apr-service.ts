@@ -13,6 +13,11 @@ import { prisma as prismaClient, PrismaClient } from "@midcurve/database";
 import type { AprSummary } from "@midcurve/shared";
 import type { PrismaTransactionClient } from "../../clients/prisma/index.js";
 import type { AprPeriodData } from "../types/position-apr/index.js";
+import {
+    buildUnrealizedWindowSnapshots,
+    calculateTimeWeightedCostBasis,
+    type CostBasisSnapshot,
+} from "../../utils/apr/apr-calculations.js";
 
 // ============================================================================
 // SERVICE CONFIGURATION
@@ -214,14 +219,29 @@ export class UniswapV3AprService {
         const lastPeriodEnd = firstPeriod
             ? firstPeriod.endTimestamp
             : params.positionOpenedAt;
+        const asOf = new Date();
         const unrealizedSeconds = Math.max(
             0,
-            (Date.now() - lastPeriodEnd.getTime()) / 1000,
+            (asOf.getTime() - lastPeriodEnd.getTime()) / 1000,
         );
         const unrealizedActiveDays = unrealizedSeconds / 86400;
+
+        // The denominator is the capital that earned the fees, not the capital
+        // standing at the end of the window. Enlarging a position mid-window
+        // otherwise divides fees earned on the smaller base by the larger one.
+        const unrealizedTWCostBasis = await this.calculateUnrealizedTWCostBasis(
+            {
+                windowStart: lastPeriodEnd,
+                asOf,
+                currentCostBasis: unrealizedCostBasis,
+            },
+            blockNumber,
+            tx,
+        );
+
         const unrealizedApr =
-            unrealizedCostBasis > 0n && unrealizedActiveDays > 0
-                ? (Number(unrealizedFees) / Number(unrealizedCostBasis)) *
+            unrealizedTWCostBasis > 0n && unrealizedActiveDays > 0
+                ? (Number(unrealizedFees) / Number(unrealizedTWCostBasis)) *
                   (365 / unrealizedActiveDays) *
                   100
                 : 0;
@@ -245,6 +265,7 @@ export class UniswapV3AprService {
             realizedApr,
             unrealizedFees,
             unrealizedCostBasis,
+            unrealizedTWCostBasis,
             unrealizedActiveDays: Math.round(unrealizedActiveDays * 10) / 10,
             unrealizedApr,
             totalApr,
@@ -258,6 +279,91 @@ export class UniswapV3AprService {
     // ============================================================================
     // PRIVATE METHODS
     // ============================================================================
+
+    /**
+     * Time-weighted cost basis over the open (unrealized) window.
+     *
+     * Reads the position's ledger events, splits them at the window start, and
+     * weights each cost basis by the time it was actually deployed — the same
+     * treatment completed periods already receive.
+     *
+     * Ignored events (liquidity moved outside the user's ownership) carry no
+     * financial effect and are excluded, matching the ledger services.
+     *
+     * @param window - Window bounds and the cost basis standing at its end
+     * @param blockNumber - Block number limit (inclusive), or 'latest'
+     * @param tx - Optional transaction client
+     */
+    private async calculateUnrealizedTWCostBasis(
+        window: {
+            windowStart: Date;
+            asOf: Date;
+            currentCostBasis: bigint;
+        },
+        blockNumber: number | "latest",
+        tx?: PrismaTransactionClient,
+    ): Promise<bigint> {
+        const db = tx ?? this.prisma;
+
+        const rows = await db.positionLedgerEvent.findMany({
+            where: { positionId: this.positionId, isIgnored: false },
+            select: { timestamp: true, costBasisAfter: true, config: true },
+        });
+
+        // Blockchain order, not timestamp order: several events can share one
+        // block timestamp, and only the last of them carries into the next
+        // segment. Matches sortByBlockchainCoordinates in the ledger services.
+        const ordered = rows
+            .map((row) => {
+                const config = row.config as {
+                    blockNumber: number;
+                    logIndex: number;
+                };
+                return {
+                    timestamp: row.timestamp,
+                    costBasisAfter: BigInt(row.costBasisAfter),
+                    blockNumber: config.blockNumber,
+                    logIndex: config.logIndex,
+                };
+            })
+            .filter(
+                (row) =>
+                    blockNumber === "latest" || row.blockNumber <= blockNumber,
+            )
+            .sort((a, b) =>
+                a.blockNumber !== b.blockNumber
+                    ? a.blockNumber - b.blockNumber
+                    : a.logIndex - b.logIndex,
+            );
+
+        const windowStartMs = window.windowStart.getTime();
+
+        // The basis in force when the window opened is the one carried by the
+        // last event at or before its start — for a collect-bounded window that
+        // is the collect itself, which leaves the cost basis untouched.
+        let windowStartCostBasis: bigint | null = null;
+        const inWindow: CostBasisSnapshot[] = [];
+        for (const row of ordered) {
+            if (row.timestamp.getTime() <= windowStartMs) {
+                windowStartCostBasis = row.costBasisAfter;
+            } else {
+                inWindow.push({
+                    timestamp: row.timestamp,
+                    costBasisAfter: row.costBasisAfter,
+                });
+            }
+        }
+
+        const snapshots = buildUnrealizedWindowSnapshots({
+            windowStart: window.windowStart,
+            events: inWindow,
+            windowStartCostBasis,
+            asOf: window.asOf,
+            currentCostBasis: window.currentCostBasis,
+        });
+
+        return calculateTimeWeightedCostBasis(snapshots);
+    }
 
     /**
      * Map database APR period record to AprPeriodData interface.

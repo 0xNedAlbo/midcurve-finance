@@ -26,6 +26,7 @@
  *
  *   unrealizedFees: 5_000000n,       // 5 USDC unclaimed
  *   unrealizedCostBasis: 10500_000000n, // Current 10.5k USDC
+ *   unrealizedTWCostBasis: 10100_000000n, // Time-weighted over the open window
  *   unrealizedActiveDays: 5,
  *   unrealizedApr: 34.76,            // 34.76% projected APR
  *
@@ -97,6 +98,27 @@ export interface AprSummary {
   unrealizedCostBasis: bigint;
 
   /**
+   * Time-weighted average cost basis across the open window
+   * In quote token units (smallest denomination)
+   *
+   * Weights the cost basis in force at each point of the window by the time it
+   * was actually deployed, so capital added or removed mid-window counts only
+   * for the part of the window it was present for.
+   *
+   * This — not `unrealizedCostBasis` — is the denominator of `unrealizedApr`.
+   * The two differ only for a position that was enlarged or reduced since the
+   * last collection; for any other position they are equal.
+   *
+   * Formula: Σ(costBasisAfter × segmentDuration) / Σ(segmentDuration)
+   *
+   * @example
+   * // 50k deployed for 20 days, topped up to 80k for the final day
+   * unrealizedCostBasis   = 80000_000000n  // capital standing now
+   * unrealizedTWCostBasis = 51519_007246n  // capital that earned the fees
+   */
+  unrealizedTWCostBasis: bigint;
+
+  /**
    * Days since last fee collection
    *
    * Time elapsed from the end of the last completed period (or position
@@ -108,7 +130,7 @@ export interface AprSummary {
    * Projected annualized APR based on current unclaimed fees
    * As a percentage (e.g., 18.25 represents 18.25% APR)
    *
-   * Formula: (unrealizedFees / unrealizedCostBasis) × (365 / unrealizedActiveDays) × 100
+   * Formula: (unrealizedFees / unrealizedTWCostBasis) × (365 / unrealizedActiveDays) × 100
    *
    * Note: This is a projection based on recent performance and may not
    * reflect future APR if market conditions change.
