@@ -63,7 +63,8 @@ midcurve-ui/
 │   ├── config/               # App configuration
 │   └── types/                # TypeScript types
 ├── public/                   # Static assets
-├── next.config.ts            # Next.js configuration
+├── vite.config.ts            # Vite configuration
+├── eslint.config.mjs         # ESLint configuration
 ├── tailwind.config.ts        # Tailwind CSS configuration
 ├── tsconfig.json             # TypeScript configuration
 └── package.json              # Dependencies
@@ -255,11 +256,11 @@ npm run yalc:update
 
 ### Image Domains
 
-Configured in [next.config.ts](next.config.ts#L12-L30):
-- CoinGecko (token logos)
-- GitHub raw (token lists)
-- 1inch (token logos)
-- Ethereum Optimism (OP token list)
+Nothing restricts them. This described `images.remotePatterns` in
+`next.config.ts` — a Next.js allowlist enforced by the `next/image`
+component. The app is a Vite SPA and renders plain `<img>`, so the
+allowlist had no effect and the file was deleted in #92. Token logos are
+loaded from whatever URL the API returns.
 
 ## Deployment
 
