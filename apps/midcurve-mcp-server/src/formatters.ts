@@ -713,6 +713,8 @@ export function formatPositionApr(
       unrealizedFeesRaw: summary.unrealizedFees,
       unrealizedCostBasis: fmt(summary.unrealizedCostBasis),
       unrealizedCostBasisRaw: summary.unrealizedCostBasis,
+      unrealizedTWCostBasis: fmt(summary.unrealizedTWCostBasis),
+      unrealizedTWCostBasisRaw: summary.unrealizedTWCostBasis,
       belowThreshold: summary.belowThreshold,
       note: summary.belowThreshold
         ? 'Position has too little history for reliable APR — treat values as preliminary.'

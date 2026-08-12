@@ -98,7 +98,21 @@ export function AprBreakdown({
                 </span>
               </div>
               <div className="flex justify-between items-center text-sm">
-                <span className="text-slate-400">Days Since Last Collect</span>
+                <span className="text-slate-400">Time-Weighted Cost Basis</span>
+                <span className="text-white font-medium">
+                  {formatCompactValue(
+                    BigInt(summary.unrealizedTWCostBasis),
+                    quoteTokenDecimals
+                  )}{" "}
+                  {quoteTokenSymbol}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-slate-400">
+                  {summary.realizedActiveDays === 0
+                    ? "Days Since Open"
+                    : "Days Since Last Collect"}
+                </span>
                 <span className="text-white font-medium">
                   {BigInt(summary.unrealizedCostBasis) > 0n
                     ? `${summary.unrealizedActiveDays} days`

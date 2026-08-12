@@ -77,8 +77,10 @@ export function formatPercentage(value: number, decimals: number = 1): string {
  * Calculates estimated APR from position data (simplified version)
  *
  * **DEPRECATED:** This function is deprecated and will be removed in a future version.
- * Use `calculateAprSummary()` from `@/lib/apr-utils` instead, which provides:
- * - Time-weighted cost basis calculation
+ * Use the `summary` returned by the position APR endpoint
+ * (`GET /api/v1/positions/.../apr`, computed by `UniswapV3AprService.calculateSummary`)
+ * instead, which provides:
+ * - Time-weighted cost basis calculation, on both the realized and unrealized side
  * - Proper handling of realized vs unrealized APR
  * - No artificial 9999% cap
  * - More accurate results based on historical APR periods
@@ -97,7 +99,7 @@ export function formatPercentage(value: number, decimals: number = 1): string {
  * - If timeElapsed < 5 minutes: returns 0% (insufficient data)
  * - If lastYieldClaimedAt is null: uses positionOpenedAt
  *
- * @deprecated Use `calculateAprSummary()` from `@/lib/apr-utils` instead
+ * @deprecated Use the `summary` from the position APR endpoint instead
  * @param params - Position data for APR calculation
  * @returns Object with APR percentage and threshold status
  */

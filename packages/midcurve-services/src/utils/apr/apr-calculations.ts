@@ -273,6 +273,143 @@ export function calculateTimeWeightedCostBasis(
 }
 
 // ============================================================================
+// UNREALIZED (OPEN) WINDOW SNAPSHOTS
+// ============================================================================
+
+/**
+ * A cost basis reading and the instant from which it applies.
+ */
+export interface CostBasisSnapshot {
+  timestamp: Date;
+  costBasisAfter: bigint;
+}
+
+/**
+ * Inputs for building the snapshot list of the open (unrealized) window.
+ */
+export interface UnrealizedWindowInput {
+  /**
+   * Start of the open window: the end of the last completed APR period, or
+   * the position's opening if no period has completed yet.
+   */
+  windowStart: Date;
+
+  /**
+   * Non-ignored ledger events inside the window (timestamp > windowStart),
+   * already sorted by blockchain coordinates (blockNumber, logIndex).
+   */
+  events: CostBasisSnapshot[];
+
+  /**
+   * Cost basis in force at `windowStart` — the costBasisAfter of the last
+   * non-ignored event at or before the window start. Null when no such event
+   * exists, in which case the first in-window event seeds the window instead.
+   */
+  windowStartCostBasis: bigint | null;
+
+  /**
+   * The instant the window is measured to.
+   */
+  asOf: Date;
+
+  /**
+   * Cost basis in force at `asOf`.
+   */
+  currentCostBasis: bigint;
+}
+
+/**
+ * Build the cost basis snapshot list for the open (unrealized) window.
+ *
+ * The realized side of the APR calculation already weights each period's cost
+ * basis by the time it was actually deployed. This produces the equivalent
+ * input for the open window, so the estimated APR divides fees by the capital
+ * that earned them rather than by the capital standing at the end.
+ *
+ * The returned list is suitable for `calculateTimeWeightedCostBasis` and never
+ * violates its preconditions: it is chronological by construction, and a window
+ * that spans no time collapses to a single snapshot.
+ *
+ * Seeding: the window opens with the cost basis in force at `windowStart`. When
+ * no event exists at or before the window start — a position whose recorded
+ * opening predates its first ledger event — the earliest in-window event seeds
+ * it instead. Weighting that gap at zero would understate a denominator that
+ * today's calculation treats as fully deployed, which would change the number
+ * for positions that never resized.
+ *
+ * @param input - Window bounds, in-window events, and the current cost basis
+ * @returns Chronological snapshots spanning windowStart → asOf
+ *
+ * @example
+ * ```typescript
+ * // 50k deployed for 20 days, topped up to 80k for the final day
+ * buildUnrealizedWindowSnapshots({
+ *   windowStart: new Date('2026-07-22T10:22:17Z'),
+ *   windowStartCostBasis: 49999_990000n,
+ *   events: [{ timestamp: new Date('2026-08-11T09:24:07Z'), costBasisAfter: 79999_920000n }],
+ *   asOf: new Date('2026-08-12T10:57:03Z'),
+ *   currentCostBasis: 79999_920000n,
+ * });
+ * // → three snapshots; calculateTimeWeightedCostBasis gives 51519_007246n,
+ * //   not the 79999_920000n a flat current-cost-basis denominator would use.
+ * ```
+ */
+export function buildUnrealizedWindowSnapshots(
+  input: UnrealizedWindowInput
+): CostBasisSnapshot[] {
+  const { windowStart, events, windowStartCostBasis, asOf, currentCostBasis } =
+    input;
+
+  // Seed the window with the basis in force at its start. See the note above on
+  // why an absent boundary event falls back to the first in-window event.
+  const seedCostBasis =
+    windowStartCostBasis ?? events[0]?.costBasisAfter ?? currentCostBasis;
+
+  const snapshots: CostBasisSnapshot[] = [
+    { timestamp: windowStart, costBasisAfter: seedCostBasis },
+  ];
+
+  for (const event of events) {
+    // Events at or before the window start are already represented by the seed.
+    if (event.timestamp.getTime() < windowStart.getTime()) {
+      continue;
+    }
+    snapshots.push({
+      timestamp: event.timestamp,
+      costBasisAfter: event.costBasisAfter,
+    });
+  }
+
+  // Close the window at `asOf`. Events sharing the final timestamp keep their
+  // zero-length segments, which contribute no weight and no duration.
+  //
+  // When `asOf` precedes the last event — a block timestamp running ahead of
+  // wall clock — the closing snapshot is omitted rather than appended, because
+  // appending it would hand `calculateTimeWeightedCostBasis` a backwards
+  // segment and throw. The cost is that the weighted window then extends past
+  // `asOf` while the caller's day count still stops there, so the two cover
+  // slightly different spans. That mismatch is preferred to failing the whole
+  // summary over a clock the position does not control, and it lasts only
+  // until wall clock passes the block timestamp.
+  const lastTimestamp = snapshots[snapshots.length - 1]!.timestamp.getTime();
+  if (asOf.getTime() > lastTimestamp) {
+    snapshots.push({ timestamp: asOf, costBasisAfter: currentCostBasis });
+  }
+
+  // A window that spans no time has no capital-over-time to weight. Its
+  // time-weighted basis is the current basis by definition, expressed here as a
+  // single snapshot so `calculateTimeWeightedCostBasis` returns it directly.
+  const spanMs =
+    snapshots[snapshots.length - 1]!.timestamp.getTime() -
+    snapshots[0]!.timestamp.getTime();
+  if (spanMs <= 0) {
+    return [{ timestamp: asOf, costBasisAfter: currentCostBasis }];
+  }
+
+  return snapshots;
+}
+
+// ============================================================================
 // APR TO PERCENTAGE CONVERSION
 // ============================================================================
 
