@@ -1,0 +1,67 @@
+{
+  "$comment": [
+    "Which workspace packages have a test suite, and — where one does not — why not.",
+    "",
+    "CI runs `pnpm -r test:run`, so membership follows the code rather than a list",
+    "in the workflow. That alone would replace a silently drifting enumeration with",
+    "a silently drifting absence: a package with no test:run script is skipped just",
+    "as quietly as an unlisted package used to be. This file is the part that makes",
+    "drift loud. scripts/check-test-manifest.mjs fails the build when it and the",
+    "workspace disagree.",
+    "",
+    "It does not decide whether a package should have tests — that is a judgement,",
+    "and it stays a judgement. It only insists the judgement was made by someone,",
+    "on the record, rather than arrived at by nobody noticing.",
+    "",
+    "runner: 'vitest'  package declares test:run; picked up by `pnpm -r test:run`",
+    "runner: 'forge'   package declares forge:test and has test/**/*.t.sol",
+    "runner: 'none'    package has no tests — 'reason' is then required",
+    "",
+    "Adding a package, or adding or removing a suite, means editing this file.",
+    "See #91."
+  ],
+  "packages": {
+    "@midcurve/shared": {
+      "runner": "vitest"
+    },
+    "@midcurve/api-shared": {
+      "runner": "vitest"
+    },
+    "@midcurve/services": {
+      "runner": "vitest"
+    },
+    "@midcurve/business-logic": {
+      "runner": "vitest"
+    },
+    "@midcurve/onchain-data": {
+      "runner": "vitest"
+    },
+    "@midcurve/mcp-server": {
+      "runner": "vitest"
+    },
+    "@midcurve/contracts": {
+      "runner": "forge",
+      "reason": "Solidity suite under test/treasury and test/vault. Run by forge, not vitest, which is why `pnpm -r test:run` cannot see it and it went years without running in CI."
+    },
+    "@midcurve/database": {
+      "runner": "none",
+      "reason": "Prisma schema and generated client only — no hand-written logic to unit-test. The property that matters here is that the migration chain reproduces schema.prisma from empty, and db:migrate:verify checks that on every PR."
+    },
+    "@midcurve/api": {
+      "runner": "none",
+      "reason": "Next.js route handlers over @midcurve/services; the logic they expose is tested in that package and in @midcurve/api-shared. Its vitest scripts were deleted in #91 — unbounded, they collected other packages' tests out of .next/standalone. Giving this package a real suite means adding a vitest.config.ts with a bounded include; check D enforces that."
+    },
+    "@midcurve/automation": {
+      "runner": "none",
+      "reason": "Worker process — price monitor and order executor. Its testable logic lives in @midcurve/services and @midcurve/business-logic, both covered. Same .next/standalone hazard as @midcurve/api if it ever gains a suite."
+    },
+    "@midcurve/signer": {
+      "runner": "none",
+      "reason": "Transaction signing service, deliberately isolated and thin. Its vitest scripts were removed in #90 after they globbed .next/standalone and collected 112 foreign test files. test:api is a tsx smoke script against a running instance, not a unit suite."
+    },
+    "@midcurve/ui": {
+      "runner": "none",
+      "reason": "Vite SPA. Its only vitest file was deleted in #91: it covered a cache helper that had had no callers since 0cdf4aca and could not compile after 6b49d484 renamed the module out from under it. Playwright specs under tests/ run via test:e2e and need a running stack, so they are not part of the PR job."
+    }
+  }
+}
