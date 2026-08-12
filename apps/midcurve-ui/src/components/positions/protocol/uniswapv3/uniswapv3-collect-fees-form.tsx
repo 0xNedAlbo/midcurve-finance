@@ -184,7 +184,6 @@ export function UniswapV3CollectFeesForm({
                 {formatCompactValue(baseTokenAmount, baseToken.decimals)}
               </span>
               {baseToken.logoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={baseToken.logoUrl}
                   alt={baseToken.symbol}
@@ -202,7 +201,6 @@ export function UniswapV3CollectFeesForm({
                 {formatCompactValue(quoteTokenAmount, quoteToken.decimals)}
               </span>
               {quoteToken.logoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={quoteToken.logoUrl}
                   alt={quoteToken.symbol}
