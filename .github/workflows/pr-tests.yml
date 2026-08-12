@@ -81,6 +81,34 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Which packages does lint actually cover? `turbo run lint` skips a
+      # package that declares no lint script, and skips it silently — so a
+      # gate that passes and a gate that ran over nothing produce the same
+      # green tick. That is the failure #92 is about, so it is printed rather
+      # than inferred: one line per package, every run, executing nothing.
+      #
+      # `--dry=text` is not used for this. It lists all twelve under "Tasks to
+      # Run" and discloses the skip only as `Command = <NONEXISTENT>`, twenty
+      # lines into each package's block — technically present, but it reads as
+      # twelve packages being linted.
+      #
+      # Enrolment is self-serving and there is no lint manifest. Unlike
+      # `pnpm -r test:run`, which cannot see a package that has tests and no
+      # script, lint has no invisible-absence case: a package is configured
+      # for it or it is not, and this step says which. See #92 and CLAUDE.md.
+      - name: Show which packages lint covers
+        run: |
+          pnpm exec turbo run lint --dry=json \
+            | jq -r '.tasks[]
+                     | if .command == "<NONEXISTENT>"
+                       then "  skipped  \(.package)  (no lint script)"
+                       else "  LINTED   \(.package)  ->  \(.command)"
+                       end' \
+            | sort
+
+      - name: Lint
+        run: pnpm lint
+
       # The treasury and factory ABIs ship as generated TypeScript (out/ is
       # gitignored). The kickstart encodes createTreasury() against the factory
       # ABI and reads a candidate treasury through the treasury ABI, so a stale
