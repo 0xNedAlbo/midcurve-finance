@@ -64,7 +64,8 @@ export function buildGetPositionAprTool(client: ApiClient) {
         'Output shape:\n' +
         '- summary: percentages (totalApr, realizedApr, unrealizedApr, baseApr, rewardApr), ' +
         'activeDays { total, realized, unrealized }, dual-emit money pairs ' +
-        '(realizedFees, realizedTWCostBasis, unrealizedFees, unrealizedCostBasis), ' +
+        '(realizedFees, realizedTWCostBasis, unrealizedFees, unrealizedCostBasis, ' +
+        'unrealizedTWCostBasis), ' +
         'belowThreshold flag and note\n' +
         '- periods[]: per-period { period: { start, end, durationDays }, apr, aprBps, ' +
         'costBasis/costBasisRaw, collectedYieldValue/collectedYieldValueRaw, eventCount }',

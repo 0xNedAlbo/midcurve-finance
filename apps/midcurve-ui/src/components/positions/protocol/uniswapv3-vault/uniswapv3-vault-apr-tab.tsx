@@ -37,6 +37,7 @@ export function UniswapV3VaultAprTab({ position }: UniswapV3VaultAprTabProps) {
           realizedApr: 0,
           unrealizedFees: "0",
           unrealizedCostBasis: "0",
+          unrealizedTWCostBasis: "0",
           unrealizedActiveDays: 0,
           unrealizedApr: 0,
           baseApr: 0,
