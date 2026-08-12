@@ -108,5 +108,19 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # Cache layers in GHCR to speed up subsequent builds
           cache-from: type=registry,ref=${{ needs.prepare.outputs.image_prefix }}-${{ matrix.service }}:buildcache
-          cache-to: type=registry,ref=${{ needs.prepare.outputs.image_prefix }}-${{ matrix.service }}:buildcache,mode=max
+          # ignore-error: this export runs after both image tags are already
+          # pushed, and GHCR intermittently rejects the blob write for
+          # :buildcache (#133). A lost cache is a slower next build, not a
+          # broken one — without this the job ships the image and still
+          # reports red, which teaches everyone to skim past red.
+          #
+          # Honoured by buildkitd, not buildx: control/control.go parses the
+          # value with strconv.ParseBool and solver/llbsolver/export.go nulls
+          # the error. A misspelt key is skipped silently and a non-boolean
+          # value is dropped with a Debugf that never reaches the Actions log —
+          # in both cases cache-export failures fail the job again. That is
+          # also what happens if a future BuildKit drops the attribute, so no
+          # version is pinned: the capability fails closed and its loss
+          # re-raises the original red build rather than passing unnoticed.
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.image_prefix }}-${{ matrix.service }}:buildcache,mode=max,ignore-error=true
           provenance: false
