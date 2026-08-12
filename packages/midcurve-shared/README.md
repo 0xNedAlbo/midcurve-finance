@@ -141,7 +141,6 @@ npm run build
 ```bash
 npm test              # Watch mode
 npm run test:run      # Single run
-npm run test:coverage # With coverage
 ```
 
 ### Type Checking

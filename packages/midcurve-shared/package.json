@@ -43,7 +43,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage",
     "yalc:push": "npm run build && yalc push"
   },
   "keywords": [

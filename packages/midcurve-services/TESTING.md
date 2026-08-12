@@ -39,14 +39,17 @@ with every other workspace suite. This package is not named in
 and [`test-manifest.json`](../../test-manifest.json) fails the build if a
 package gains or loses a suite without being recorded.
 
-`pnpm test:coverage` produces a coverage report. It is not run in CI.
+There is no coverage script. #91 deleted the `test:coverage` that used to be
+here, for the same reason it deleted the five `--project` scripts: it had
+never run. It passed `--env-file=.env.test` against a git-ignored file, so
+it failed on any clone but its author's — and with that removed it failed
+again on `Cannot find dependency '@vitest/coverage-v8'`, which no package in
+the workspace has ever declared. Two independent reasons, neither of them
+noticed, because nothing in CI ever invoked it.
 
-It used to pass `--env-file=.env.test` against a git-ignored file, so it
-failed on any clone but its author's. #91 removed that: no test in this
-package reads an environment variable, so the flag was a leftover of the
-integration split described below rather than something the script needed.
-The same change added `@vitest/coverage-v8`, which nothing in the workspace
-had ever declared — the script had two independent reasons not to run.
+Coverage is therefore not set up here. If you want it, set it up
+deliberately: declare the provider, and have a reason for it to exist.
+Do not reconstruct the deleted script on the assumption it once worked.
 
 ## Writing one
 
