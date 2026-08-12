@@ -98,7 +98,7 @@ jobs:
       # The contrast with #133's decision *not* to pin buildx is deliberate:
       # there, losing the capability fails closed and re-raises the original
       # symptom, so the loss reports itself. Here there is no such property —
-      # a nightly lint change produces a false red and nothing corrects it.
+      # an upstream lint change produces a false red and nothing corrects it.
       - name: Set up Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:

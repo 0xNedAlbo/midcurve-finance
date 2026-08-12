@@ -15,17 +15,31 @@
  *   A  package set     workspace packages must match the manifest exactly
  *   B  runner          the declared runner must match the package's scripts
  *   C  orphan tests    a "none" package must not contain test files
- *   D  .next guard     a vitest package that emits .next must bound `include`
+ *   D  .next guard     a vitest package that emits .next must declare an
+ *                      explicit `include` that does not start at `**`
  *
  * C is the one that catches a package with tests and no script — the case
  * `pnpm -r test:run` can never see, because it keys on scripts and C keys on
- * files. D is the one that catches an unbounded `include` globbing a build
- * tree full of other packages' sources. Both are drawn from real instances;
- * see the issue.
+ * files. D is the one that catches a suite in a Next.js app collecting out of
+ * .next/standalone. Both are drawn from real instances; see the issue.
  *
- * Zero dependencies on purpose: this runs before `pnpm install` has built
- * anything, and a checker that needs a toolchain to tell you the toolchain is
- * misconfigured is not much use.
+ * What these checks do NOT cover, so the guarantee is not read as wider than
+ * it is:
+ *
+ *   - C only inspects packages declared "none". Test files inside a *vitest*
+ *     package that its own `include` happens to exclude are invisible here —
+ *     the same failure one step over. No package declares an `include` today,
+ *     so that gap is latent rather than live.
+ *   - D checks that an `include` is declared and does not begin at `**`. It
+ *     does not evaluate the globs, so a sufficiently creative pattern can
+ *     still reach .next/. Presence and shape are checked; genuine
+ *     boundedness is not. Deliberate — evaluating a vitest config here would
+ *     cost more than the failure it prevents.
+ *
+ * Zero dependencies on purpose: a checker that needs the toolchain in order
+ * to tell you the toolchain is misconfigured is not much use. It runs
+ * directly after `pnpm install` and before the build, so it reports early and
+ * needs nothing built.
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -62,30 +76,34 @@ const TEST_FILE_RE = /\.(test|spec)\.(ts|tsx|mts|cts|js|jsx)$/;
 const SOL_TEST_RE = /\.t\.sol$/;
 
 /**
- * Where a package's Playwright specs live, from its own playwright.config.*,
- * or null if it has no Playwright config.
+ * Where a package's Playwright specs live, from its own playwright.config.*.
+ *
+ * Returns { hasConfig, testDir }. `testDir` is null when there is no config,
+ * or when a config exists but declares no testDir — in which case `problem`
+ * is called and the caller skips the orphan scan, since files it cannot
+ * classify would otherwise be reported twice for one cause.
  *
  * Check C asks "are there test files here that run nowhere?". Playwright
  * specs are not nowhere — they run under `test:e2e`, which this job
- * deliberately does not run (they need a live stack). Excluding them by
- * reading `testDir` keeps that exemption tied to the package's own
- * configuration rather than to a path hardcoded here; move the specs and the
- * exemption moves with them.
+ * deliberately does not run (they need a live stack). Reading `testDir` keeps
+ * that exemption tied to the package's own configuration rather than to a
+ * path hardcoded here; move the specs and the exemption moves with them.
  */
-function playwrightTestDir(dir) {
+function playwrightTestDir(dir, problem) {
   const config = ['ts', 'mts', 'js', 'mjs']
     .map((ext) => join(dir, `playwright.config.${ext}`))
     .find((p) => existsSync(p));
-  if (!config) return null;
+  if (!config) return { hasConfig: false, testDir: null };
 
   const match = readFileSync(config, 'utf8').match(/testDir\s*:\s*['"`]([^'"`]+)['"`]/);
   if (!match) {
-    throw new Error(
-      `${posix(relative(ROOT, config))} declares no testDir, so this check cannot tell ` +
-        'which specs Playwright owns. Set testDir explicitly.'
+    problem(
+      `has ${posix(relative(ROOT, config))} but it declares no testDir, so this check ` +
+        'cannot tell which test files Playwright owns. Set testDir explicitly.'
     );
+    return { hasConfig: true, testDir: null };
   }
-  return join(dir, match[1]);
+  return { hasConfig: true, testDir: join(dir, match[1]) };
 }
 
 const errors = [];
@@ -265,17 +283,24 @@ for (const [name, entry] of Object.entries(declared)) {
   // --- C: a "none" package must not contain test files ---------------------
 
   if (runner === 'none') {
-    const e2eDir = playwrightTestDir(dir);
-    if (e2eDir && !scripts['test:e2e']) {
+    const { hasConfig, testDir: e2eDir } = playwrightTestDir(dir, (message) =>
+      fail('C', name, message)
+    );
+    if (hasConfig && !scripts['test:e2e']) {
       fail(
         'C',
         name,
         'has a playwright.config but no "test:e2e" script, so its specs run nowhere at all.'
       );
     }
-    const orphans = findFiles(dir, (f) => TEST_FILE_RE.test(f)).filter(
-      (f) => !e2eDir || !f.startsWith(e2eDir + sep)
-    );
+    // A config we could not read testDir out of has already been reported;
+    // scanning for orphans now would report the same files a second time.
+    const scannable = !hasConfig || e2eDir !== null;
+    const orphans = scannable
+      ? findFiles(dir, (f) => TEST_FILE_RE.test(f)).filter(
+          (f) => !e2eDir || !f.startsWith(e2eDir + sep)
+        )
+      : [];
     if (orphans.length > 0) {
       const list = orphans.map((f) => `        ${posix(relative(ROOT, f))}`).join('\n');
       fail(
@@ -303,17 +328,42 @@ for (const [name, entry] of Object.entries(declared)) {
         name,
         'runs vitest and builds with Next.js, but has no vitest.config.*.\n' +
           "      vitest's default `exclude` covers dist/ but NOT .next/, and this app's\n" +
-          '      standalone output contains copies of other packages\' sources. Without a\n' +
-          '      bounded `include` the suite will collect them. See #91.'
+          '      standalone output contains copies of other packages\' sources. Without an\n' +
+          '      explicit `include` the suite will collect them. See #91.'
       );
-    } else if (!/\binclude\s*:/.test(readFileSync(config, 'utf8'))) {
-      fail(
-        'D',
-        name,
-        `has ${posix(relative(ROOT, config))} but it does not set \`include\`.\n` +
-          '      A Next.js package must bound collection explicitly — .next/standalone/\n' +
-          "      is not in vitest's default `exclude`. See #91."
-      );
+    } else {
+      const source = readFileSync(config, 'utf8');
+      const where = posix(relative(ROOT, config));
+      const declaration = source.match(/\binclude\s*:\s*\[([^\]]*)\]/);
+
+      if (!/\binclude\s*:/.test(source)) {
+        fail(
+          'D',
+          name,
+          `has ${where} but it does not set \`include\`.\n` +
+            '      A Next.js package must declare collection explicitly — .next/standalone/\n' +
+            "      is not in vitest's default `exclude`. See #91."
+        );
+      } else if (declaration) {
+        // Not a glob evaluator, and deliberately not: a pattern that starts at
+        // `**` walks the whole package, which is the realistic way this goes
+        // wrong. Anything subtler than that is out of scope — see the header.
+        const unrooted = [...declaration[1].matchAll(/['"`]([^'"`]+)['"`]/g)]
+          .map((m) => m[1])
+          .filter((pattern) => pattern.startsWith('**'));
+
+        if (unrooted.length > 0) {
+          fail(
+            'D',
+            name,
+            `has ${where}, but its \`include\` starts at the package root: ` +
+              `${unrooted.map((p) => JSON.stringify(p)).join(', ')}.\n` +
+              '      That walks .next/standalone/ too, which holds copies of other\n' +
+              "      packages' sources. Root the pattern at the source directory\n" +
+              '      instead, e.g. "src/**/*.test.ts". See #91.'
+          );
+        }
+      }
     }
   }
 }
@@ -326,7 +376,7 @@ const CHECK_NAMES = {
   A: 'package set',
   B: 'runner vs scripts',
   C: 'orphan test files',
-  D: 'unbounded include',
+  D: 'include guard',
 };
 
 if (errors.length > 0) {

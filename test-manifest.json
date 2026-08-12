@@ -41,7 +41,7 @@
     },
     "@midcurve/contracts": {
       "runner": "forge",
-      "reason": "Solidity suite under test/treasury and test/vault. Run by forge, not vitest, which is why `pnpm -r test:run` cannot see it and it went years without running in CI."
+      "reason": "Solidity suite under test/treasury and test/vault. Run by forge, not vitest, which is why `pnpm -r test:run` cannot see it and it never ran in CI until #91."
     },
     "@midcurve/database": {
       "runner": "none",
