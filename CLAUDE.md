@@ -95,16 +95,54 @@ backfill scripts — is covered by neither lint nor typecheck.
 There is no lint manifest, and one would add a mechanism without adding a
 guarantee. `test-manifest.json` exists because `pnpm -r test:run` cannot see
 a package that has tests and no script — absence is invisible there. Lint has
-no equivalent blind spot, and the `--dry=text` step in the workflow prints
-the enrolled set on every run.
+no equivalent blind spot, and the `Show which packages lint covers` step
+prints the enrolled set on every run. That step is not decoration either:
+turbo's own output reads `Running lint in 12 packages` while linting one,
+because it counts packages in scope rather than packages with the task.
 
 **The gate covers errors. Warnings are not a gate, they are a reading, and
 they do not fail CI.** No `--max-warnings 0`: a warning ceiling over a backlog
 nobody intends to clear, or a ratchet at today's count that drifts the moment
-anyone edits the file, is decoration rather than enforcement. Warnings
-standing at **48 `react-hooks/set-state-in-effect` and 36
-`react-hooks/exhaustive-deps` as of 2026-08-12**, recorded so the number is
-falsifiable later instead of becoming folklore.
+anyone edits the file, is decoration rather than enforcement.
+
+### Rules demoted to `warn`, and the line that stops there
+
+Recorded in one table so the total is visible in one place and falsifiable
+later, rather than as four sentences nobody adds up. All in `@midcurve/ui`.
+
+| rule | count | as of |
+|---|---|---|
+| `react-hooks/set-state-in-effect` | 48 | 2026-08-12 |
+| `react-hooks/exhaustive-deps` | 36 | 2026-08-12 (plugin default, not demoted by us) |
+| `@typescript-eslint/no-explicit-any` | 25 | 2026-08-12 |
+| `react-hooks/purity` | 3 | 2026-08-12 |
+
+Each was deferred because fixing it is design or UI-behaviour work that
+deserves its own review, not because it is unimportant. The compound effect
+is that **the gate fails on nothing currently in the tree**, which is worth
+saying out loud. Two things stop that being decoration:
+
+**It is not empty.** **78 rules stay at `error`** with zero current
+violations, and gate from the first run — `no-dupe-else-if`,
+`no-constant-binary-expression`, `no-async-promise-executor`,
+`@typescript-eslint/no-unsafe-declaration-merging`,
+`@typescript-eslint/no-misused-new`, and 73 others. "Catches nothing on
+today's tree" is true; "catches nothing" is false, and the difference is the
+whole value.
+
+Note what is *not* in that 78: typescript-eslint's `eslint-recommended`
+turns **off** the base rules tsc already enforces, so `no-dupe-keys`,
+`no-const-assign` and their kin read as severity 0 in the resolved config.
+That is deliberate deduplication, not a gap — those failures surface from
+`pnpm typecheck` instead. Check with
+`pnpm exec eslint --print-config <file>` before assuming a rule is live.
+
+**No further demotions.** This is the line. If a rule fires in future, fix
+the finding, or remove the rule with a stated reason. Do not lower its
+severity. A config that reaches green by demoting rules until nothing errors
+is the same artifact as a check that passes because it looked at three
+files, and [#91](https://github.com/0xNedAlbo/midcurve-finance/issues/91)
+and #92 were both spent removing those.
 
 Two hazards worth knowing before enrolling a package. ESLint's flat config
 does **not** read `.gitignore`, so build output must be listed in `ignores`
