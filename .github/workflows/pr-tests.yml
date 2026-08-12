@@ -56,6 +56,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Does every workspace package's test situation match what is recorded?
+      # The recursive run below follows the code rather than a list, which
+      # means a package with no test:run script is skipped silently — this is
+      # what turns that silence into a red build. Runs before the build both
+      # for fast feedback and because it needs nothing built; it also keeps
+      # the orphan-test check away from .next/standalone, which it prunes
+      # anyway. See test-manifest.json.
+      - name: Check test manifest
+        run: pnpm check:test-manifest
+
       # Does applying the checked-in migrations to an empty database produce the
       # schema the client expects? Hand-written migrations are standing practice
       # here, so this is the expected failure of the workflow rather than a rare
@@ -76,8 +86,23 @@ jobs:
       # ABI and reads a candidate treasury through the treasury ABI, so a stale
       # copy misencodes a live transaction rather than failing to compile.
       # Recompile and compare.
+      # Pinned deliberately. The action's `version` input defaults to
+      # "stable", which is not a fixed version — it tracks whatever the
+      # latest stable Foundry release is, so the toolchain moves under us
+      # between runs. With lint_on_build enabled and severity reaching down
+      # to "info" (foundry.toml), an upstream release can turn this job red
+      # with no change in this repository. #133 landed to stop shipping
+      # builds that go red for reasons unrelated to the code; introducing
+      # `forge test` on a moving toolchain would reopen that hole.
+      #
+      # The contrast with #133's decision *not* to pin buildx is deliberate:
+      # there, losing the capability fails closed and re-raises the original
+      # symptom, so the loss reports itself. Here there is no such property —
+      # a nightly lint change produces a false red and nothing corrects it.
       - name: Set up Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
 
       - name: Verify generated treasury artifacts are current
         run: |
@@ -89,20 +114,29 @@ jobs:
                                   packages/midcurve-shared/src/abis/midcurve-treasury-factory/ \
             || { echo "::error::Treasury artifacts are stale. Run 'cd apps/midcurve-contracts && forge build && pnpm gen:treasury-artifacts' and commit the result."; exit 1; }
 
-      - name: Test @midcurve/shared
-        run: pnpm --filter @midcurve/shared test:run
+      # The Solidity suite — 125 tests over the treasury and vault contracts,
+      # which had never run in CI. No fork and no RPC, so it needs no secrets
+      # and takes under a second. Placed after the artifact check so a stale
+      # ABI still reports as a stale ABI rather than as a test failure, and so
+      # `forge build` above has already warmed the output.
+      #
+      # Invoked through the package script rather than as a bare `forge test`
+      # so the package keeps one definition of how its tests run — that is
+      # also what check B in the manifest enforces.
+      - name: Test contracts (forge)
+        run: pnpm --filter @midcurve/contracts forge:test
 
-      - name: Test @midcurve/api-shared
-        run: pnpm --filter @midcurve/api-shared test:run
-
-      - name: Test @midcurve/mcp-server
-        run: pnpm --filter @midcurve/mcp-server test:run
-
-      - name: Test @midcurve/services
-        run: pnpm --filter @midcurve/services test:run
-
-      - name: Test @midcurve/business-logic
-        run: pnpm --filter @midcurve/business-logic test:run
-
-      - name: Test @midcurve/onchain-data
-        run: pnpm --filter @midcurve/onchain-data test:run
+      # Every workspace package that declares test:run, without naming any of
+      # them here. Six packages and 489 tests at the time of writing — the
+      # same six this step replaced, so it changes no coverage today; the
+      # point is that the seventh arrives on its own. test-manifest.json is
+      # what stops a package from going missing from this set unnoticed.
+      #
+      # --reporter=append-only keeps the package name on every line, so a
+      # failure is still attributable now that the six steps are one. In CI it
+      # is what pnpm selects anyway for a non-TTY stdout; it is set explicitly
+      # so attribution does not rest on that heuristic. Note that pnpm accepts
+      # any --reporter value without validating it, so a wrong name here would
+      # be ignored silently rather than error.
+      - name: Unit tests (every workspace package)
+        run: pnpm --reporter=append-only -r test:run
