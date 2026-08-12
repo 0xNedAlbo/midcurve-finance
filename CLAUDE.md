@@ -74,6 +74,48 @@ sources and is *not* in vitest's default `exclude`.
 
 Rationale and the failures behind each check: [#91](https://github.com/0xNedAlbo/midcurve-finance/issues/91).
 
+## Lint in CI
+
+CI runs `pnpm lint` (`turbo run lint`). Enrolment is self-serving: a package
+with an ESLint config and a `lint` script is picked up automatically, one
+without is skipped. **`@midcurve/ui` is the only enrolled package today.**
+
+**Most packages have no ESLint config, and that is deliberate — not an
+oversight.** They are covered by `turbo run typecheck`, which catches the
+class of defect that actually matters here; adding configs is what generates
+a large first-run backlog, and nobody has asked for lint on those packages.
+Whoever wants it for a package adds a config and a script.
+
+The exceptions, so the gap is on the record rather than implied away:
+**`@midcurve/contracts` and `@midcurve/database` declare no `typecheck`
+script either**, so their hand-written TypeScript — the deploy and ops
+scripts under `apps/midcurve-contracts/scripts/` and the Prisma seed and
+backfill scripts — is covered by neither lint nor typecheck.
+
+There is no lint manifest, and one would add a mechanism without adding a
+guarantee. `test-manifest.json` exists because `pnpm -r test:run` cannot see
+a package that has tests and no script — absence is invisible there. Lint has
+no equivalent blind spot, and the `--dry=text` step in the workflow prints
+the enrolled set on every run.
+
+**The gate covers errors. Warnings are not a gate, they are a reading, and
+they do not fail CI.** No `--max-warnings 0`: a warning ceiling over a backlog
+nobody intends to clear, or a ratchet at today's count that drifts the moment
+anyone edits the file, is decoration rather than enforcement. Warnings
+standing at **48 `react-hooks/set-state-in-effect` and 36
+`react-hooks/exhaustive-deps` as of 2026-08-12**, recorded so the number is
+falsifiable later instead of becoming folklore.
+
+Two hazards worth knowing before enrolling a package. ESLint's flat config
+does **not** read `.gitignore`, so build output must be listed in `ignores`
+explicitly or lint findings get attributed to generated code — for
+`@midcurve/ui` that was `dist/`, 162 of the 503 files it would otherwise
+have walked. In a Next.js package the same trap is `.next/standalone/`,
+which holds copies of *other* packages' sources; that is the lint-side twin
+of check D in the test manifest.
+
+Rationale and the state it was in beforehand: [#92](https://github.com/0xNedAlbo/midcurve-finance/issues/92).
+
 ## Architecture Docs
 For detailed architecture, auth flows, and design decisions:
 see [docs/architecture.md](docs/architecture.md) and package-level CLAUDE.md files.
