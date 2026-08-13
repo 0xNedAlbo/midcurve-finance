@@ -75,6 +75,45 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
+      # `prisma format` is not a check: it has no --check mode in 6.19.0, whose
+      # only flags are --help, --config and --schema. So the check is to run the
+      # formatter and see whether it changed anything — the same shape as the
+      # treasury-artifact check below, and for the same reason. A
+      # repository-standard tool nobody can run without producing an unrelated
+      # 59-line diff is the same defect class as a script that cannot execute.
+      #
+      # The diff is deliberately *not* path-scoped, which is the one place this
+      # departs from the treasury check. `git diff --exit-code -- <path>` reports
+      # success forever if the path is mistyped: git diffs nothing, exits 0, and
+      # the step stays green while claiming to have verified formatting — and no
+      # amount of green disproves it. Bare, the failure mode inverts: an earlier
+      # step that dirties the tree turns this red immediately, once, on a change
+      # somebody is already watching. --exit-code prints the diff, so a red names
+      # the file whatever the cause.
+      #
+      # Nothing else writes to a tracked path before this point — install is
+      # --frozen-lockfile, prisma generate's output is gitignored, and the
+      # migration-chain script writes only to a throwaway database. Established
+      # by reading `git status --porcelain` at this point in the job during #92's
+      # verification, rather than assumed.
+      #
+      # Needs no database, no DATABASE_URL and nothing built: the formatter parses
+      # the schema and rewrites it, and never resolves env("DATABASE_URL"). Placed
+      # after the migration chain rather than before it so a formatting failure
+      # leaves the more substantive check's result visible above it.
+      #
+      # prisma is deliberately not pinned to an exact version. An upgrade that
+      # changes the formatter's output would turn this red on an unrelated PR —
+      # but that red is *true*: the file genuinely is not in the shape the current
+      # tool produces, and the message names the one command that fixes it.
+      # Contrast the Foundry pin below, where an upstream change produces a red
+      # about code nobody touched with nothing the reader can act on.
+      - name: Verify prisma schema is formatted
+        run: |
+          pnpm --filter @midcurve/database db:format
+          git diff --exit-code \
+            || { echo "::error::schema.prisma is not formatted. Run 'pnpm --filter @midcurve/database db:format' and commit the result."; exit 1; }
+
       - name: Build
         run: pnpm build
 
