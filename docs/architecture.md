@@ -45,7 +45,7 @@ The platform runs as a **multi-service Docker Compose stack** with separate fron
 │  │  ┌─────────────────────────┐  ┌─────────────────────────┐       │
 │  │  │   midcurve-api          │  │   midcurve-onchain-data │       │
 │  │  │   Port 3001             │  │   (no HTTP port)        │       │
-│  │  │   Next.js REST API      │  │   WebSocket Subscriber  │       │
+│  │  │   Next.js REST API      │  │   RPC Polling Workers   │       │
 │  │  │   SIWE Auth, Sessions   │  │   RabbitMQ Publisher    │       │
 │  │  └───────────┬─────────────┘  └───────────┬─────────────┘       │
 │  │              │                            │                       │
@@ -474,19 +474,21 @@ midcurve-automation/
 
 **Location:** `apps/midcurve-onchain-data/`
 
-**Purpose:** Real-time blockchain event listener that monitors Uniswap V3 pools, position liquidity, ERC-20 approvals/balances, and close orders via WebSocket subscriptions. Publishes events to RabbitMQ for consumption by business-logic and automation services.
+**Purpose:** Blockchain event listener that monitors Uniswap V3 pools, ERC-20 approvals/balances, and close orders by polling RPC. Publishes events to RabbitMQ for consumption by business-logic and automation services.
+
+**Delivery mechanism:** polling, throughout. There are no WebSocket subscriptions in this package — `869c4c89` migrated every subscriber to polling, and #93 removed the stranded `src/ws/` providers along with viem's `webSocket` transport. The classes still carry `Subscriber` in their names, which reflects the DB-driven subscription model (`OnchainDataSubscribers` rows), not an `eth_subscribe` connection.
 
 **Technology:**
 - **Node.js 20+** - Standalone runtime (no HTTP framework)
-- **viem** - EVM WebSocket subscriptions
+- **viem** - EVM RPC reads (`eth_getLogs`, multicall, contract reads)
 - **RabbitMQ** - Event publisher
 - **Pino** - Structured logging
 
-**Workers** (under `src/workers/`) — a mix of WebSocket subscribers, polling workers, and RabbitMQ consumers, plus domain-event handlers under `src/events/`:
+**Workers** (under `src/workers/`) — polling workers and RabbitMQ consumers, plus domain-event handlers under `src/events/`:
 
 *Platform-agnostic (EVM-wide):*
-- `erc20-approval-subscriber.ts` — WebSocket subscription to ERC-20 `Approval` events for tracked spenders
-- `erc20-balance-subscriber.ts` — WebSocket subscription to ERC-20 `Transfer` events for balance tracking
+- `erc20-approval-subscriber.ts` — polls ERC-20 `allowance()` via multicall for tracked spenders
+- `erc20-balance-subscriber.ts` — polls ERC-20 `balanceOf()` via multicall for balance tracking
 - `evm-tx-status-subscriber.ts` — polls RPC for confirmation status of pending transactions
 
 *Uniswap V3 (under `workers/uniswapv3/`):*
@@ -498,7 +500,7 @@ midcurve-automation/
 - React to `OnchainDataSubscribers` table changes (entity created/closed) and dynamically add/remove the on-chain subscriptions above.
 
 **Key Characteristics:**
-- Hybrid streaming + polling - WebSocket where supported, polling for state that doesn't emit events
+- Polling only - `eth_getLogs` for event-emitting sources, multicall/contract reads for state that doesn't emit events
 - DB-driven subscriptions - One `OnchainDataSubscribers` row per tracked entity; subscription IDs of the form `auto:{consumer}:{entityId}` per `.claude/rules/automation-workers.md`
 - Domain-event triggered - No interval timers; subscription syncing is driven by domain events
 - Publishes to RabbitMQ - exchanges include `pool-prices`, `position-liquidity-events`, `close-order-events`
@@ -508,7 +510,9 @@ midcurve-automation/
 midcurve-onchain-data/
 ├── src/
 │   ├── index.ts              # Entry point
-│   ├── workers/              # All 8 subscribers + WorkerManager
+│   ├── workers/              # All 6 subscribers + WorkerManager
+│   ├── polling/              # Per-chain polling batches (pools, closers)
+│   ├── catchup/              # Finalized-block close-order catch-up
 │   ├── mq/                   # RabbitMQ connection, topology, message types
 │   ├── events/               # Domain event handlers
 │   └── lib/                  # Logger, config, services
@@ -1230,7 +1234,7 @@ The primary deployment method is Docker Compose with a multi-service architectur
 │  caddy           │ Reverse proxy, SSL termination (80/443)  │
 │  ui              │ Vite SPA + nginx (3000)                  │
 │  api             │ Next.js REST API (3001)                  │
-│  onchain-data    │ WebSocket event listeners                │
+│  onchain-data    │ RPC polling event listeners              │
 │  automation      │ Order execution (3004)                   │
 │  business-logic  │ Event processing & scheduled rules       │
 │  signer          │ Transaction signing (3003)               │
