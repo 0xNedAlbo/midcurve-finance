@@ -96,15 +96,39 @@ jobs:
       # `pnpm -r test:run`, which cannot see a package that has tests and no
       # script, lint has no invisible-absence case: a package is configured
       # for it or it is not, and this step says which. See #92 and CLAUDE.md.
+      # It also asserts, rather than only reporting. Printing the enrolled set
+      # and exiting 0 regardless would leave the failure one `package.json`
+      # edit away: drop @midcurve/ui's lint script and this prints twelve
+      # `skipped` lines, `pnpm lint` passes over nothing, and CI is green —
+      # caught only if somebody reads the log of a passing step, which nobody
+      # does. So zero enrolled packages is a red build.
+      #
+      # `set -o pipefail` makes it fail closed in the other direction too: if
+      # a future turbo changes the --dry=json shape out from under the jq,
+      # the count reaches zero (or the pipeline errors) and this step fails,
+      # rather than silently reporting an empty set.
       - name: Show which packages lint covers
         run: |
-          pnpm exec turbo run lint --dry=json \
+          set -euo pipefail
+
+          report=$(pnpm exec turbo run lint --dry=json \
             | jq -r '.tasks[]
                      | if .command == "<NONEXISTENT>"
                        then "  skipped  \(.package)  (no lint script)"
                        else "  LINTED   \(.package)  ->  \(.command)"
                        end' \
-            | sort
+            | sort)
+
+          printf '%s\n' "$report"
+
+          enrolled=$(printf '%s\n' "$report" | grep -c '^  LINTED ' || true)
+          echo
+          echo "Packages enrolled in lint: $enrolled"
+
+          if [ "$enrolled" -eq 0 ]; then
+            echo "::error::The lint gate covers no packages. \`pnpm lint\` would pass over nothing, which is indistinguishable from passing. Give a package an ESLint config and a \"lint\" script, or if lint is being removed deliberately, remove this step and the Lint step with it. See CLAUDE.md, \"Lint in CI\"."
+            exit 1
+          fi
 
       - name: Lint
         run: pnpm lint

@@ -100,6 +100,14 @@ prints the enrolled set on every run. That step is not decoration either:
 turbo's own output reads `Running lint in 12 packages` while linting one,
 because it counts packages in scope rather than packages with the task.
 
+**That step also fails the build when the enrolled set is empty**, which is
+what makes it a check rather than a printout. Deleting `@midcurve/ui`'s
+`lint` script is a one-line edit, and without the assertion it would leave
+`pnpm lint` reporting `0 successful, 0 total` in 116ms — green, and
+indistinguishable from a gate that ran. If you are removing lint on purpose,
+remove that step and the `Lint` step with it rather than letting the set go
+to zero.
+
 **The gate covers errors. Warnings are not a gate, they are a reading, and
 they do not fail CI.** No `--max-warnings 0`: a warning ceiling over a backlog
 nobody intends to clear, or a ratchet at today's count that drifts the moment
