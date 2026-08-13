@@ -1,16 +1,19 @@
 /**
  * Close Order Catch-Up Orchestrator
  *
- * Coordinates the catch-up process for close order lifecycle events:
+ * Coordinates the catch-up process for close order lifecycle events.
  *
- * 1. NON-FINALIZED BLOCKS (Phase 1 - blocking):
- *    Scans from (finalizedBlock + 1) to currentBlock.
- *    Must complete before subscriber starts normal operation.
- *    These blocks could reorg, so we process them first while subscriber buffers.
+ * FINALIZED BLOCKS ONLY: scans from cachedBlock to finalizedBlock and leaves
+ * the cursor at the finalized block.
  *
- * 2. FINALIZED BLOCKS (Phase 2 - background):
- *    Scans from cachedBlock to finalizedBlock.
- *    Safe to run in background since these blocks are immutable.
+ * The non-finalized range (finalizedBlock + 1 → chain head) is deliberately not
+ * covered here. `UniswapV3CloserPollingBatch.poll()` scans
+ * `lastProcessedBlock + 1` → `client.getBlockNumber()` — the chain head, not the
+ * finalized head — so the poller picks up the remainder on its next cycle. A
+ * second catch-up pass over the same range would only close a startup latency
+ * window bounded by CLOSER_POLL_INTERVAL_MS, on a path that is itself a fallback
+ * (primary delivery is receipt extraction in the API and the automation
+ * executor). See #93.
  *
  * Unlike position-liquidity catch-up, this uses contract addresses (not nftId topics)
  * for eth_getLogs filtering, and decodes logs using the V100 ABI.
@@ -294,92 +297,6 @@ export async function fetchHistoricalCloseOrderEvents(options: {
 // ============================================================
 
 /**
- * Execute catch-up for NON-FINALIZED blocks.
- * Scans from (finalizedBlock + 1) to currentBlock.
- * Must run while subscriber is buffering.
- */
-export async function executeCloseOrderCatchUpNonFinalized(
-  chainId: number,
-  contractAddresses: string[]
-): Promise<CatchUpResult> {
-  const startTime = Date.now();
-  const config = getCatchUpConfig();
-
-  log.info({ chainId, contractCount: contractAddresses.length }, 'Starting non-finalized close order catch-up');
-
-  try {
-    const finalizedBlock = await getFinalizedBlockNumber(chainId);
-    const evmConfig = EvmConfig.getInstance();
-    const client = evmConfig.getPublicClient(chainId);
-    const currentBlock = await client.getBlockNumber();
-
-    const fromBlock = finalizedBlock + 1n;
-    const toBlock = currentBlock;
-
-    log.info({
-      chainId,
-      finalizedBlock: finalizedBlock.toString(),
-      fromBlock: fromBlock.toString(),
-      toBlock: toBlock.toString(),
-    }, 'Non-finalized close order block range determined');
-
-    if (fromBlock > toBlock) {
-      log.info({ chainId }, 'No non-finalized blocks to catch up for close orders');
-      return { chainId, eventsPublished: 0, fromBlock, toBlock, durationMs: Date.now() - startTime };
-    }
-
-    const events = await fetchHistoricalCloseOrderEvents({
-      chainId,
-      contractAddresses,
-      fromBlock,
-      toBlock,
-      batchSize: config.batchSizeBlocks,
-    });
-
-    let publishedCount = 0;
-    const mq = getRabbitMQConnection();
-
-    for (const { event } of events) {
-      if (!event) continue;
-      try {
-        const routingKey = closeOrderRoutingKeyForEvent(event);
-        const content = serializeCloseOrderEvent(event);
-        await mq.publishCloseOrderEvent(routingKey, content);
-        publishedCount++;
-      } catch (error) {
-        log.warn({
-          chainId,
-          eventType: event.type,
-          nftId: event.nftId,
-          vaultAddress: event.vaultAddress,
-          ownerAddress: event.ownerAddress,
-          error: error instanceof Error ? error.message : String(error),
-        }, 'Failed to publish non-finalized close order catch-up event');
-      }
-    }
-
-    // Do NOT update cached block here (non-finalized blocks can reorg)
-    const durationMs = Date.now() - startTime;
-
-    log.info({
-      chainId,
-      fromBlock: fromBlock.toString(),
-      toBlock: toBlock.toString(),
-      eventsFound: events.length,
-      eventsPublished: publishedCount,
-      durationMs,
-    }, 'Non-finalized close order catch-up completed');
-
-    return { chainId, eventsPublished: publishedCount, fromBlock, toBlock, durationMs };
-  } catch (error) {
-    const durationMs = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    log.error({ chainId, error: errorMessage, durationMs }, 'Non-finalized close order catch-up failed');
-    return { chainId, eventsPublished: 0, fromBlock: 0n, toBlock: 0n, durationMs, error: errorMessage };
-  }
-}
-
-/**
  * Execute catch-up for FINALIZED blocks.
  * Scans from cachedBlock to finalizedBlock.
  * Safe to run in background.
@@ -469,31 +386,6 @@ export async function executeCloseOrderCatchUpFinalized(
 // ============================================================
 // Multi-Chain Wrappers
 // ============================================================
-
-/**
- * Execute non-finalized catch-up for multiple chains.
- * Processes sequentially to avoid overwhelming RPC providers.
- */
-export async function executeCloseOrderCatchUpNonFinalizedForChains(
-  chainContracts: Map<number, string[]>
-): Promise<CatchUpResult[]> {
-  const config = getCatchUpConfig();
-  if (!config.enabled) {
-    log.info('Close order catch-up disabled by configuration');
-    return [];
-  }
-
-  const results: CatchUpResult[] = [];
-  for (const [chainId, addresses] of chainContracts) {
-    const result = await executeCloseOrderCatchUpNonFinalized(chainId, addresses);
-    results.push(result);
-  }
-
-  const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
-  log.info({ chainsProcessed: results.length, totalEvents }, 'Non-finalized close order catch-up completed for all chains');
-
-  return results;
-}
 
 /**
  * Execute finalized catch-up for multiple chains.

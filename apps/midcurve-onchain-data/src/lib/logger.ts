@@ -70,24 +70,6 @@ export const priceLog = {
   },
 
   /**
-   * Log WebSocket connection event
-   */
-  wsConnection(
-    logger: ServiceLogger,
-    chainId: number,
-    event: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error',
-    metadata?: Record<string, unknown>
-  ): void {
-    const level = event === 'error' ? 'error' : 'info';
-    logger[level]({
-      chainId,
-      event,
-      ...metadata,
-      msg: `WebSocket chain ${chainId}: ${event}`,
-    });
-  },
-
-  /**
    * Log subscription event
    */
   subscription(
