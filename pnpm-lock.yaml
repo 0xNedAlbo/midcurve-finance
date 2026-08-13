@@ -363,9 +363,6 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.20.6
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.12)(@types/node@20.19.25)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.20.6)
 
   apps/midcurve-ui:
     dependencies:
