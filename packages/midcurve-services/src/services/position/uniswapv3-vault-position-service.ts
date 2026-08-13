@@ -55,7 +55,7 @@ import { SharedContractService } from '../automation/shared-contract-service.js'
 import { Erc20TokenService } from '../token/erc20-token-service.js';
 import {
     UniswapV3CloseOrderService,
-    type CloseOrderChainSnapshot,
+    type CloseOrderChainRead,
 } from '../close-order/uniswapv3-close-order-service.js';
 import { tickToPrice, createErc20TokenHash, createEvmOwnerWallet, calculatePositionValue } from '@midcurve/shared';
 import { calculateTokenValueInQuote } from '../../utils/uniswapv3/ledger-calculations.js';
@@ -166,7 +166,7 @@ interface VaultRefreshPlan {
     /** Vault state at `blockNumber` */
     onChainState: OnChainVaultState;
     /** Close-order slots, or null when skipped or unreadable */
-    closeOrders: CloseOrderChainSnapshot | null;
+    closeOrders: CloseOrderChainRead | null;
 }
 
 // ============================================================================
@@ -702,13 +702,33 @@ export class UniswapV3VaultPositionService {
             fromBlock = lastEvent ? lastEvent.blockNumber : 0n;
         }
 
-        // Look up the closer contract address for this chain
-        let closerAddress: Address | undefined;
-        const closerContract = await this._sharedContractService.findLatestByChainAndName(
-            chainId, 'UniswapV3VaultPositionCloser' as SharedContractName,
+        // Look up the closer contract for this chain, once. This used to be
+        // resolved here *and* again inside fetchChainSnapshot, and the two
+        // reacted to "not registered" differently: this one fell through
+        // silently and skipped the closer's event logs, the other threw. One
+        // lookup, one reaction, one log line (#86).
+        const closer = await this._closeOrderService.resolveCloserContract(
+            chainId,
+            position.protocol,
         );
-        if (closerContract) {
-            closerAddress = closerContract.config.address as Address;
+        const closerAddress = closer?.address as Address | undefined;
+
+        if (!closer) {
+            // Said out loud rather than left as a branch that quietly does less
+            // work. Note the scope: without the closer address the OrderExecuted
+            // / FeeApplied / SwapExecuted logs below are not fetched either, so
+            // an executed close-out is missing from the *ledger*, not just from
+            // the close-order list.
+            this.logger.warn(
+                {
+                    positionId: id,
+                    chainId,
+                    contractName: UniswapV3CloseOrderService.closerContractName(
+                        position.protocol,
+                    ),
+                },
+                'No closer contract registered for this chain — skipping closer event logs and close-order reconciliation',
+            );
         }
 
         const logs = await this.fetchAllVaultLogs(
@@ -717,21 +737,18 @@ export class UniswapV3VaultPositionService {
 
         // Resolve the remaining chain reads together: the price at every event
         // block, current vault state, and the close-order slots.
+        // A close-order read failure propagates. It used to be caught and
+        // downgraded to a warn, which made an RPC outage indistinguishable from
+        // a position that genuinely has no close orders (#86). The
+        // already-resolved `closer` is handed over so this does not look the
+        // contract up a second time.
         const [poolPrices, onChainState, closeOrders] = await Promise.all([
             prefetchPoolPrices(
                 chainId, position.typedConfig.poolAddress, logs, this._poolPriceService,
             ),
             this.fetchVaultState(position, blockNumber),
             options.includeCloseOrders
-                // Close-order reconciliation is best-effort and non-fatal; a
-                // missing closer contract must not fail the whole refresh.
-                ? this._closeOrderService.fetchChainSnapshot(id, blockNumber, dbTx).catch((error: unknown) => {
-                    this.logger.warn(
-                        { positionId: id, error: (error as Error).message },
-                        'Close order chain read failed (non-fatal) — skipping reconciliation',
-                    );
-                    return null;
-                })
+                ? this._closeOrderService.fetchChainSnapshot(id, blockNumber, dbTx, closer)
                 : Promise.resolve(null),
         ]);
 
@@ -769,16 +786,15 @@ export class UniswapV3VaultPositionService {
             await this.importVaultLogs(plan, tx);
             const result = await this.writeOnChainState(plan, tx);
 
-            if (plan.closeOrders) {
-                // Best-effort, non-fatal — mirrors the read side in planRefresh.
-                try {
-                    await this._closeOrderService.reconcileChainSnapshot(plan.closeOrders, tx);
-                } catch (closeOrderError) {
-                    this.logger.warn(
-                        { positionId: plan.position.id, error: (closeOrderError as Error).message },
-                        'Close order reconciliation failed (non-fatal)',
-                    );
-                }
+            // No catch — mirrors the read side in planRefresh. This is pure
+            // database work, so a failure here has already aborted `tx`; a
+            // catch would not have rescued the refresh, only relabelled a dead
+            // transaction and moved the symptom to the next statement.
+            if (plan.closeOrders?.status === 'ok') {
+                await this._closeOrderService.reconcileChainSnapshot(
+                    plan.closeOrders.snapshot,
+                    tx,
+                );
             }
 
             return result;

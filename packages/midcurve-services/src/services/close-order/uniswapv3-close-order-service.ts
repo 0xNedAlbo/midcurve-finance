@@ -27,7 +27,7 @@
 import { prisma as prismaClient, PrismaClient } from '@midcurve/database';
 import type { CloseOrder, Prisma } from '@midcurve/database';
 import { ContractTriggerMode, OnChainOrderStatus, compareAddresses } from '@midcurve/shared';
-import type { ContractSwapDirection } from '@midcurve/shared';
+import type { ContractSwapDirection, SharedContractName } from '@midcurve/shared';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import type { PrismaTransactionClient } from '../../clients/prisma/index.js';
@@ -227,6 +227,32 @@ export interface CloseOrderChainSnapshot {
   slots: CloseOrderChainSlot[];
 }
 
+/**
+ * Outcome of {@link UniswapV3CloseOrderService.fetchChainSnapshot}.
+ *
+ * `unavailable` exists so that "this chain has no closer contract registered"
+ * — a fact, readable from the database — stops being discovered by throwing.
+ * It used to be an exception, which forced callers into a catch that then hid
+ * RPC outages and defects along with it (#86).
+ *
+ * Everything else still throws: an outage, a malformed position, a missing
+ * position. Those are not states, and the caller is not meant to continue.
+ */
+/** A closer contract located for a chain. */
+export interface ResolvedCloserContract {
+  contractName: string;
+  address: string;
+}
+
+export type CloseOrderChainRead =
+  | { status: 'ok'; snapshot: CloseOrderChainSnapshot }
+  | {
+      status: 'unavailable';
+      reason: 'no-closer-contract';
+      chainId: number;
+      contractName: string;
+    };
+
 // ============================================================================
 // Service
 // ============================================================================
@@ -268,6 +294,40 @@ export class UniswapV3CloseOrderService {
   }
 
   /**
+   * The closer contract name for a protocol. One place, so the NFT and vault
+   * paths cannot drift apart on what they are looking for.
+   */
+  static closerContractName(protocol: string): SharedContractName {
+    return (
+      protocol === 'uniswapv3-vault'
+        ? 'UniswapV3VaultPositionCloser'
+        : 'UniswapV3PositionCloser'
+    ) as SharedContractName;
+  }
+
+  /**
+   * Resolve the closer contract for a chain, or null when none is registered.
+   *
+   * Null is an answer, not a failure — see {@link CloseOrderChainRead}. Callers
+   * that need the address for something else as well (the vault refresh reads
+   * the closer's event logs) resolve it once here and hand the result to
+   * {@link fetchChainSnapshot}, so there is a single lookup with a single
+   * reaction to it rather than two that react differently.
+   */
+  async resolveCloserContract(
+    chainId: number,
+    protocol: string,
+  ): Promise<ResolvedCloserContract | null> {
+    const contractName = UniswapV3CloseOrderService.closerContractName(protocol);
+    const sharedContract = await this.sharedContractService.findLatestByChainAndName(
+      chainId,
+      contractName,
+    );
+    if (!sharedContract) return null;
+    return { contractName, address: sharedContract.config.address };
+  }
+
+  /**
    * Read the on-chain close-order state for a position, without writing anything.
    *
    * This is the network half of {@link refresh}. It is public so that callers
@@ -275,6 +335,10 @@ export class UniswapV3CloseOrderService {
    * opening it, then pass the result to {@link reconcileChainSnapshot}. Holding
    * a transaction open across these reads is what made position refresh exceed
    * Prisma's interactive-transaction timeout.
+   *
+   * Returns a {@link CloseOrderChainRead}: `unavailable` when no closer is
+   * registered for the chain, `ok` otherwise. Every other failure throws — an
+   * RPC outage is not a state to be carried on with.
    *
    * @param positionId - Position ID to read close orders for
    * @param blockNumber - Block number to read state at, or 'latest'
@@ -284,12 +348,15 @@ export class UniswapV3CloseOrderService {
    *   earlier in the same transaction, for instance. Callers doing the
    *   fetch-then-write split leave it unset, which is the whole point: nothing
    *   is open while the RPC reads below run.
+   * @param closer - Already-resolved closer contract, when the caller needed it
+   *   for its own reasons. Omit to have it resolved here.
    */
   async fetchChainSnapshot(
     positionId: string,
     blockNumber: number | 'latest' = 'latest',
     tx?: PrismaTransactionClient,
-  ): Promise<CloseOrderChainSnapshot> {
+    closer?: ResolvedCloserContract | null,
+  ): Promise<CloseOrderChainRead> {
     log.methodEntry(this.logger, 'fetchChainSnapshot', { positionId, blockNumber });
 
     const db = tx ?? this.prisma;
@@ -322,18 +389,16 @@ export class UniswapV3CloseOrderService {
     const hasOperator = operatorKeyId !== null;
     const ourOperatorAddress = operatorAddressEntry?.value ?? null;
 
-    // 3. Find the closer contract for this chain (protocol-specific)
-    const contractName = isVault ? 'UniswapV3VaultPositionCloser' : 'UniswapV3PositionCloser';
-    const sharedContract = await this.sharedContractService.findLatestByChainAndName(
-      chainId,
-      contractName,
-    );
-    if (!sharedContract) {
-      throw new Error(
-        `No ${contractName} contract found for chain ${chainId}`,
-      );
+    // 3. Find the closer contract for this chain (protocol-specific).
+    // Absent is a state, not an error: it means automation is not deployed on
+    // this chain, which the caller reports rather than fails on.
+    const resolved = closer ?? (await this.resolveCloserContract(chainId, protocol));
+    if (!resolved) {
+      const contractName = UniswapV3CloseOrderService.closerContractName(protocol);
+      log.methodExit(this.logger, 'fetchChainSnapshot', { positionId, unavailable: true });
+      return { status: 'unavailable', reason: 'no-closer-contract', chainId, contractName };
     }
-    const contractAddress = sharedContract.config.address;
+    const contractAddress = resolved.address;
 
     // 4. Read both trigger modes from the chain, in parallel
     const triggerModes = [ContractTriggerMode.LOWER, ContractTriggerMode.UPPER] as const;
@@ -372,17 +437,20 @@ export class UniswapV3CloseOrderService {
     log.methodExit(this.logger, 'fetchChainSnapshot', { positionId });
 
     return {
-      positionId,
-      protocol,
-      chainId,
-      isVault,
-      contractAddress,
-      nftId,
-      vaultAddress,
-      ownerAddress,
-      hasOperator,
-      ourOperatorAddress,
-      slots,
+      status: 'ok',
+      snapshot: {
+        positionId,
+        protocol,
+        chainId,
+        isVault,
+        contractAddress,
+        nftId,
+        vaultAddress,
+        ownerAddress,
+        hasOperator,
+        ourOperatorAddress,
+        slots,
+      },
     };
   }
 
@@ -560,8 +628,21 @@ export class UniswapV3CloseOrderService {
   ): Promise<RefreshCloseOrdersResult> {
     // `tx` is threaded into the fetch as well so this keeps reading its own
     // caller's uncommitted writes, exactly as it did before the split.
-    const snapshot = await this.fetchChainSnapshot(positionId, blockNumber, tx);
-    return this.reconcileChainSnapshot(snapshot, tx);
+    const read = await this.fetchChainSnapshot(positionId, blockNumber, tx);
+
+    if (read.status === 'unavailable') {
+      // No closer deployed on this chain, so there is nothing on-chain to
+      // reconcile against and an empty result is true rather than assumed.
+      // Any DB rows from an earlier registration are left alone — this is not
+      // evidence they are stale.
+      this.logger.warn(
+        { positionId, chainId: read.chainId, contractName: read.contractName },
+        'No closer contract registered for this chain — close-order automation unavailable',
+      );
+      return { orders: [], created: 0, updated: 0, deleted: 0 };
+    }
+
+    return this.reconcileChainSnapshot(read.snapshot, tx);
   }
 
   // ==========================================================================

@@ -71,7 +71,7 @@ import {
 import { SupportedChainId } from "../../config/evm.js";
 import { CacheService } from "../cache/cache-service.js";
 import { UniswapV3CloseOrderService } from "../close-order/uniswapv3-close-order-service.js";
-import type { CloseOrderChainSnapshot } from "../close-order/uniswapv3-close-order-service.js";
+import type { CloseOrderChainRead } from "../close-order/uniswapv3-close-order-service.js";
 import { UserWalletService } from "../wallet-perimeter/user-wallet-service.js";
 
 /**
@@ -924,19 +924,17 @@ export class UniswapV3PositionService {
                 dbTx,
             );
 
-            // g2) Discover close orders (best-effort)
-            try {
-                const closeOrderResult = await this._closeOrderService.discover(position.id, dbTx);
-                if (closeOrderResult.discovered > 0) {
-                    this.logger.info(
-                        { positionId: position.id, discovered: closeOrderResult.discovered },
-                        "Close orders discovered during position import",
-                    );
-                }
-            } catch (closeOrderError) {
-                this.logger.warn(
-                    { positionId: position.id, error: (closeOrderError as Error).message },
-                    "Close order discovery failed (non-fatal)",
+            // g2) Discover close orders. A failure propagates and the import
+            // fails with it. The import path makes the same false claim the
+            // refresh path does — a position presented with an empty
+            // close-order list when nobody knows whether it is empty — and
+            // self-healing on some later refresh does not make the claim true
+            // in the meantime.
+            const closeOrderResult = await this._closeOrderService.discover(position.id, dbTx);
+            if (closeOrderResult.discovered > 0) {
+                this.logger.info(
+                    { positionId: position.id, discovered: closeOrderResult.discovered },
+                    "Close orders discovered during position import",
                 );
             }
 
@@ -1269,23 +1267,32 @@ export class UniswapV3PositionService {
         const resolvedBlockNumber = Number(onChainState.blockNumber);
 
         // Close-order reads are the only RPC in refreshOnChainState that is
-        // never cached, so do them here. Best-effort: reconciliation is
-        // non-fatal, and a null snapshot makes refreshOnChainState fall back to
-        // reading them itself.
-        const closeOrderSnapshot = await this._closeOrderService
-            .fetchChainSnapshot(id, resolvedBlockNumber, dbTx)
-            .catch((error: unknown) => {
-                this.logger.warn(
-                    { positionId: id, error: (error as Error).message },
-                    "Close order chain read failed (non-fatal) — skipping reconciliation",
-                );
-                return null;
-            });
+        // never cached, so do them here — still outside the transaction.
+        //
+        // A failure propagates. It used to be caught and downgraded to a warn,
+        // which made an outage, a missing registration and a defect all present
+        // to the caller as a position with no close orders (#86).
+        const closeOrderRead = await this._closeOrderService.fetchChainSnapshot(
+            id,
+            resolvedBlockNumber,
+            dbTx,
+        );
+
+        if (closeOrderRead.status === "unavailable") {
+            this.logger.warn(
+                {
+                    positionId: id,
+                    chainId: closeOrderRead.chainId,
+                    contractName: closeOrderRead.contractName,
+                },
+                "No closer contract registered for this chain — close-order automation unavailable",
+            );
+        }
 
         // Phase 2 — writes.
         const run = async (tx: PrismaTransactionClient): Promise<UniswapV3Position> => {
             await this.importPositionLogs(plan, tx);
-            return this.refreshOnChainState(id, blockNumber, tx, closeOrderSnapshot);
+            return this.refreshOnChainState(id, blockNumber, tx, closeOrderRead);
         };
 
         if (dbTx) return run(dbTx);
@@ -1306,15 +1313,16 @@ export class UniswapV3PositionService {
      * @param id - Position ID
      * @param blockNumber - Block to read state from
      * @param dbTx - Optional Prisma transaction client
-     * @param closeOrderSnapshot - Close-order chain state already read by the
-     *   caller. Supplying it keeps the two closer-contract reads out of `dbTx`.
-     *   When omitted, close orders are read and reconciled in one step as before.
+     * @param closeOrderRead - Close-order chain state already read by the
+     *   caller, which is the only way close orders get reconciled here: this
+     *   method never reads the chain itself, because it runs inside `dbTx`.
+     *   Omit it to skip reconciliation — `reset()` does, deliberately.
      */
     private async refreshOnChainState(
         id: string,
         blockNumber: number | "latest" = "latest",
         dbTx?: PrismaTransactionClient,
-        closeOrderSnapshot?: CloseOrderChainSnapshot | null,
+        closeOrderRead?: CloseOrderChainRead | null,
     ): Promise<UniswapV3Position> {
         try {
             // 0. Get position to determine pool ID
@@ -1411,30 +1419,23 @@ export class UniswapV3PositionService {
             // 6. Refresh metrics (common fields: value, PnL, fees, price range)
             await this.refreshMetrics(id, resolvedBlockNumber, dbTx);
 
-            // 6.5 Reconcile close orders from on-chain (best-effort).
-            // When the caller already read the chain (refresh() does, before
-            // opening its transaction), reconcile from that snapshot instead of
-            // reading again from in here.
-            try {
-                if (closeOrderSnapshot) {
-                    await this._closeOrderService.reconcileChainSnapshot(
-                        closeOrderSnapshot,
-                        dbTx,
-                    );
-                } else {
-                    await this._closeOrderService.refresh(
-                        id,
-                        resolvedBlockNumber,
-                        dbTx,
-                    );
-                }
-            } catch (closeOrderError) {
-                this.logger.warn(
-                    {
-                        positionId: id,
-                        error: (closeOrderError as Error).message,
-                    },
-                    "Close order reconciliation failed (non-fatal)",
+            // 6.5 Reconcile close orders against the snapshot the caller read
+            // before opening this transaction.
+            //
+            // No catch. This is pure database work, so the only failures it can
+            // raise are database ones — and a database error has already
+            // aborted the transaction by the time any catch here would run.
+            // Swallowing it did not keep the refresh alive; it relabelled a
+            // dead transaction and moved the symptom to the next statement.
+            //
+            // There is no read-it-here fallback either. It would have put RPC
+            // inside this transaction — the exact thing the phase split exists
+            // to prevent — and was reachable only when the read had already
+            // failed.
+            if (closeOrderRead?.status === "ok") {
+                await this._closeOrderService.reconcileChainSnapshot(
+                    closeOrderRead.snapshot,
+                    dbTx,
                 );
             }
 
@@ -1626,6 +1627,12 @@ export class UniswapV3PositionService {
                 "Refreshing position state from on-chain data",
             );
 
+            // No close-order read is passed, so reconciliation is skipped. A
+            // reset rebuilds the ledger from chain history; close orders are
+            // not part of that and reading them here would mean RPC inside this
+            // transaction. The vault reset already worked this way
+            // (`includeCloseOrders: false`) — this makes the two agree. The
+            // next refresh reconciles them.
             const refreshedPosition = await this.refreshOnChainState(id, "latest", dbTx);
 
             this.logger.info(
