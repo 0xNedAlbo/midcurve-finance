@@ -65,7 +65,6 @@ model ApiKey {
   @@schema("public")
 }
 
-
 // =============================================================================
 // Cache & Core Models
 // =============================================================================
@@ -99,7 +98,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   // User identification
-  name  String?
+  name String?
 
   // Wallet address (EIP-55 checksummed, chain-agnostic)
   address String @unique
@@ -114,7 +113,7 @@ model User {
   apiKeys ApiKey[]
 
   // Midcurve position relations
-  positions             Position[]
+  positions Position[]
 
   // User settings (1:1)
   userSettings UserSettings?
@@ -131,7 +130,7 @@ model User {
 model UserAllowListEntry {
   id        String   @id @default(cuid())
   address   String   @unique // EIP-55 checksummed wallet address
-  note      String?           // Optional admin note (e.g., "early access", "team")
+  note      String? // Optional admin note (e.g., "early access", "team")
   createdAt DateTime @default(now())
 
   @@map("user_allow_list_entries")
@@ -239,9 +238,9 @@ model Position {
   positionHash String?
 
   // PnL related fields (stored as string for bigint precision)
-  currentValue String // bigint as string
-  costBasis    String // bigint as string
-  realizedPnl  String // bigint as string
+  currentValue  String // bigint as string
+  costBasis     String // bigint as string
+  realizedPnl   String // bigint as string
   unrealizedPnl String // bigint as string
 
   // General cash flow fields for non-AMM protocols (stored as string for bigint precision)
@@ -253,8 +252,8 @@ model Position {
   unrealizedCashflow String @default("0") // bigint as string - pending cash flow
 
   // Yield fields (stored as string for bigint precision)
-  collectedYield    String // bigint as string
-  unclaimedYield    String // bigint as string
+  collectedYield     String // bigint as string
+  unclaimedYield     String // bigint as string
   lastYieldClaimedAt DateTime? // null = no yield claimed yet
 
   // APR metrics
@@ -265,17 +264,17 @@ model Position {
   // Position state
   positionOpenedAt DateTime
   archivedAt       DateTime?
-  isArchived       Boolean     @default(false)
+  isArchived       Boolean   @default(false)
 
   // Protocol-specific data (JSON)
   config Json // Immutable: chainId, nftId, poolAddress, ticks, etc.
   state  Json // Mutable: ownerAddress, liquidity, feeGrowth, tokensOwed, etc.
 
   // Relations
-  ledgerEvents     PositionLedgerEvent[]
-  aprPeriods       PositionAprPeriod[]
-  closeOrders          CloseOrder[] // Close order cache (SL/TP)
-  automationLogs       AutomationLog[] // Automation event logs for this position
+  ledgerEvents   PositionLedgerEvent[]
+  aprPeriods     PositionAprPeriod[]
+  closeOrders    CloseOrder[] // Close order cache (SL/TP)
+  automationLogs AutomationLog[] // Automation event logs for this position
 
   @@unique([userId, positionHash, ownerWallet]) // Same user+wallet can't import same position twice
   // Indexes for efficient queries
@@ -287,7 +286,6 @@ model Position {
   @@map("positions")
   @@schema("public")
 }
-
 
 model PositionLedgerEvent {
   id        String   @id @default(cuid())
@@ -313,22 +311,22 @@ model PositionLedgerEvent {
   inputHash String
 
   // Financial data (stored as string for bigint precision)
-  tokenValue   String // bigint as string - Total value in quote token units
-  rewards      Json // Array of {tokenId: string, tokenAmount: string, tokenValue: string}
+  tokenValue String // bigint as string - Total value in quote token units
+  rewards    Json // Array of {tokenId: string, tokenAmount: string, tokenValue: string}
 
   // PnL tracking (stored as string for bigint precision)
-  deltaCostBasis      String // bigint as string - Change in cost basis from this event
-  costBasisAfter      String // bigint as string - Cumulative cost basis after this event
-  deltaPnl            String // bigint as string - Change in realized PnL from this event
-  pnlAfter            String // bigint as string - Cumulative realized PnL after this event
-  deltaCollectedYield      String @default("0") // bigint as string - Yield collected in this event
-  collectedYieldAfter      String @default("0") // bigint as string - Cumulative collected yield after this event
-  deltaRealizedCashflow   String @default("0") // bigint as string - Realized cashflow in this event (perpetuals, etc.)
-  realizedCashflowAfter   String @default("0") // bigint as string - Cumulative realized cashflow after this event
+  deltaCostBasis        String // bigint as string - Change in cost basis from this event
+  costBasisAfter        String // bigint as string - Cumulative cost basis after this event
+  deltaPnl              String // bigint as string - Change in realized PnL from this event
+  pnlAfter              String // bigint as string - Cumulative realized PnL after this event
+  deltaCollectedYield   String @default("0") // bigint as string - Yield collected in this event
+  collectedYieldAfter   String @default("0") // bigint as string - Cumulative collected yield after this event
+  deltaRealizedCashflow String @default("0") // bigint as string - Realized cashflow in this event (perpetuals, etc.)
+  realizedCashflowAfter String @default("0") // bigint as string - Cumulative realized cashflow after this event
 
   // Ownership tracking — events outside user ownership are ignored for financials
-  isIgnored      Boolean @default(false)  // true = event happened outside user's ownership
-  ignoredReason  String?                  // e.g., "not_owned_by_user"
+  isIgnored     Boolean @default(false) // true = event happened outside user's ownership
+  ignoredReason String? // e.g., "not_owned_by_user"
 
   // Protocol-specific data (JSON)
   config Json // Protocol-specific config (blockNumber, txIndex, logIndex, liquidity, fees, etc.)
@@ -363,7 +361,7 @@ model PositionAprPeriod {
   durationSeconds Int // endTimestamp - startTimestamp (in seconds)
 
   // Financial metrics (stored as string for bigint precision)
-  costBasis         String // Average cost basis during period (in quote token units)
+  costBasis           String // Average cost basis during period (in quote token units)
   collectedYieldValue String // Total yield collected during period (in quote token units)
 
   // APR calculation
@@ -461,8 +459,8 @@ model CloseOrder {
   // retrying:   execution failed, waiting 60s before retry
   // failed:     max execution attempts exhausted (terminal)
   // executed:   order executed successfully on-chain (terminal)
-  automationState   String @default("monitoring") // inactive|monitoring|executing|retrying|failed|executed
-  executionAttempts Int    @default(0) // resets to 0 when price moves away from trigger
+  automationState   String  @default("monitoring") // inactive|monitoring|executing|retrying|failed|executed
+  executionAttempts Int     @default(0) // resets to 0 when price moves away from trigger
   lastError         String? // last execution error for diagnostics
 
   // === IDENTITY HASH (replaces protocol-specific unique constraints) ===
@@ -502,7 +500,6 @@ model CloseOrder {
 
   // Constraints
   @@unique([positionId, closeOrderHash])
-
   // Indexes
   @@index([protocol])
   @@index([automationState])
