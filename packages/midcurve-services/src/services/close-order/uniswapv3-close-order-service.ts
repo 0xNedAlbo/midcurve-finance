@@ -1145,6 +1145,17 @@ export class UniswapV3CloseOrderService {
   /**
    * Transitions executing → retrying (execution failed, waiting for retry).
    * Sets lastError for diagnostics.
+   *
+   * Guarded on the source state. This used to be an unconditional update by
+   * id, which meant anything that threw after a successful execution could
+   * drag a finished order back to retrying and have it republished — while
+   * `atomicTransitionToExecuting` a few lines up demonstrated that the guarded
+   * form was available and chosen elsewhere (#86).
+   *
+   * A non-match is not an error: the caller is already handling a failure, and
+   * an order that is no longer executing has been resolved by someone else.
+   * The order is left alone and returned unchanged, which `scheduleRetry`
+   * already handles — it only proceeds for orders in `retrying`.
    */
   async transitionToRetrying(
     id: string,
@@ -1155,17 +1166,31 @@ export class UniswapV3CloseOrderService {
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.closeOrder.update({
-        where: { id },
+      const updateResult = await db.closeOrder.updateMany({
+        where: { id, automationState: 'executing' },
         data: {
           automationState: 'retrying',
           lastError: error,
         },
       });
 
+      const current = await db.closeOrder.findUnique({ where: { id } });
+      if (!current) {
+        throw new Error(`Close order not found: ${id}`);
+      }
+
+      if (updateResult.count === 0) {
+        this.logger.warn(
+          { id, automationState: current.automationState },
+          'Order not in executing state — leaving it as is rather than transitioning to retrying',
+        );
+        log.methodExit(this.logger, 'transitionToRetrying', { id, skipped: true });
+        return current;
+      }
+
       this.logger.info({ id, automationState: 'retrying' }, 'Order transitioned to retrying');
       log.methodExit(this.logger, 'transitionToRetrying', { id });
-      return result;
+      return current;
     } catch (err) {
       log.methodError(this.logger, 'transitionToRetrying', err as Error, { id });
       throw err;
@@ -1215,17 +1240,36 @@ export class UniswapV3CloseOrderService {
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.closeOrder.update({
-        where: { id },
+
+      // Same guard, same reason as transitionToRetrying. Both callers reach
+      // this from `retrying`, and without the guard the hole that one closes
+      // simply reopens here: an order that finished successfully could still
+      // be marked terminally failed by the attempt-exhaustion branch.
+      const updateResult = await db.closeOrder.updateMany({
+        where: { id, automationState: 'retrying' },
         data: {
           automationState: 'failed',
           lastError: error,
         },
       });
 
+      const current = await db.closeOrder.findUnique({ where: { id } });
+      if (!current) {
+        throw new Error(`Close order not found: ${id}`);
+      }
+
+      if (updateResult.count === 0) {
+        this.logger.warn(
+          { id, automationState: current.automationState },
+          'Order not in retrying state — leaving it as is rather than marking it failed',
+        );
+        log.methodExit(this.logger, 'markFailed', { id, skipped: true });
+        return current;
+      }
+
       this.logger.warn({ id, automationState: 'failed' }, 'Order marked as failed');
       log.methodExit(this.logger, 'markFailed', { id });
-      return result;
+      return current;
     } catch (err) {
       log.methodError(this.logger, 'markFailed', err as Error, { id });
       throw err;
