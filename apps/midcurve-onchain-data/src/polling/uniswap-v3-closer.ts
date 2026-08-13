@@ -28,9 +28,6 @@ const log = onchainDataLogger.child({ component: 'UniswapV3CloserPoller' });
 /** Polling interval for eth_getLogs reads (default: 1 hour, fallback safety net) */
 const POLL_INTERVAL_MS = parseInt(process.env.CLOSER_POLL_INTERVAL_MS || '3600000', 10);
 
-/** Maximum blocks per eth_getLogs request */
-const BATCH_SIZE_BLOCKS = parseInt(process.env.CLOSER_POLL_BATCH_SIZE || '10000', 10);
-
 /**
  * Contract info for polling.
  */
@@ -181,7 +178,6 @@ export class UniswapV3CloserPollingBatch {
       contractAddresses: this.contractAddresses,
       fromBlock,
       toBlock: currentBlock,
-      batchSize: BATCH_SIZE_BLOCKS,
     });
 
     if (events.length > 0) {

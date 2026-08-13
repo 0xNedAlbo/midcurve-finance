@@ -20,7 +20,14 @@ import {
   UniswapV3PositionCloserV100Abi,
   UniswapV3VaultPositionCloserV100Abi,
 } from '@midcurve/shared';
-import { keccak256, toHex } from 'viem';
+import {
+  createPublicClient,
+  http,
+  keccak256,
+  toHex,
+  TimeoutError,
+  type PublicClient,
+} from 'viem';
 import { onchainDataLogger } from '../lib/logger';
 import {
   buildCloseOrderEvent,
@@ -136,84 +143,170 @@ function computeEventSignatures(): `0x${string}`[] {
 
 const LIFECYCLE_EVENT_SIGNATURES = computeEventSignatures();
 
+// ============================================================
+// Scan Client
+// ============================================================
+
 /**
- * Fetch historical close order events using eth_getLogs.
+ * Milliseconds allowed for one close order sweep.
  *
- * Filters by contract addresses and event signatures.
- * Processes in batches to respect RPC limits.
+ * A sweep is a single eth_getLogs call over the whole range — up to full chain
+ * history when the cursor is cold — so viem's 10 second transport default is far
+ * too short for it. There is no per-request override in viem: `client.request`
+ * only overrides retry options, and the timeout is fixed when the transport is
+ * built. Hence a dedicated client.
+ *
+ * retryCount is 0 on purpose. Three silent retries of a two minute request is
+ * six minutes of a startup path that looks hung — indistinguishable from the
+ * hang this is meant to surface.
+ */
+const SCAN_TIMEOUT_MS = 120_000;
+
+const scanClients = new Map<number, PublicClient>();
+
+/**
+ * Public client used for close order sweeps only.
+ *
+ * Deliberately not `EvmConfig.getPublicClient()`: that instance is shared by
+ * every reader in the process and carries viem's defaults. Raising the timeout
+ * there would change the behaviour of unrelated calls.
+ */
+function getScanClient(chainId: number): PublicClient {
+  const cached = scanClients.get(chainId);
+  if (cached) return cached;
+
+  const chainConfig = EvmConfig.getInstance().getChainConfig(chainId);
+  const client = createPublicClient({
+    chain: chainConfig.viemChain,
+    transport: http(chainConfig.rpcUrl, {
+      timeout: SCAN_TIMEOUT_MS,
+      retryCount: 0,
+    }),
+  });
+
+  scanClients.set(chainId, client);
+  return client;
+}
+
+/**
+ * The diagnosis that ships with a failed sweep.
+ *
+ * Two failures look the same in a stack trace and have opposite answers:
+ *
+ * - The provider rejected the range. Then the assumption baked into this file is
+ *   wrong, and saying so is the whole point — nothing in the code hints that a
+ *   plan and a chain set were assumed.
+ * - The request timed out. The range was never rejected; the call was still
+ *   running. Naming the plan here would send the reader to their Alchemy
+ *   dashboard over a request that simply needed longer.
+ *
+ * A confidently wrong diagnosis is worse than none, so the timeout branch says
+ * what happened and stops there.
+ */
+function describeScanFailure(options: {
+  chainId: number;
+  fromBlock: bigint;
+  toBlock: bigint;
+  error: unknown;
+}): string {
+  const { chainId, fromBlock, toBlock, error } = options;
+  const range = `chain ${chainId} over blocks ${fromBlock}-${toBlock} in a single eth_getLogs call`;
+
+  if (error instanceof TimeoutError) {
+    return (
+      `Close order scan timed out after ${SCAN_TIMEOUT_MS} ms for ${range}. ` +
+      'The request was still running when the client gave up: this is not a rejected ' +
+      'block range and says nothing about the RPC plan. The cursor is left where it ' +
+      'was and the next poll retries the same range.'
+    );
+  }
+
+  return (
+    `Close order scan failed for ${range}. The range is deliberately not split into ` +
+    'windows: this code assumes an Alchemy Pay As You Go key or better, on Ethereum, ' +
+    'Arbitrum or Base, where eth_getLogs accepts unlimited block ranges. A free-tier ' +
+    'key or a different provider is the likely cause. See issue #88.'
+  );
+}
+
+// ============================================================
+// The Sweep
+// ============================================================
+
+/**
+ * Scan `fromBlock` → `toBlock` for close order events in ONE eth_getLogs call.
+ *
+ * No block-window batching: see the note on SCAN_TIMEOUT_MS and #88. A closer
+ * query filtered by address and topic returns zero-to-few logs even over full
+ * chain history, nowhere near the 150MB response cap.
+ *
+ * THIS FUNCTION THROWS. It used to catch, warn, and return whatever it had,
+ * which the caller could not distinguish from "no events found" — so the caller
+ * advanced the cursor over blocks nobody had looked at. Under a single sweep the
+ * identical failure would lose the entire range rather than one window, silently.
+ * The contract is now binary: the range was scanned, or this throws.
  */
 export async function fetchHistoricalCloseOrderEvents(options: {
   chainId: number;
   contractAddresses: string[];
   fromBlock: bigint;
   toBlock: bigint;
-  batchSize: number;
 }): Promise<{ event: ReturnType<typeof buildCloseOrderEvent>; blockNumber: bigint }[]> {
-  const { chainId, contractAddresses, fromBlock, toBlock, batchSize } = options;
-  const evmConfig = EvmConfig.getInstance();
-  const client = evmConfig.getPublicClient(chainId);
+  const { chainId, contractAddresses, fromBlock, toBlock } = options;
+  const client = getScanClient(chainId);
   const results: { event: ReturnType<typeof buildCloseOrderEvent>; blockNumber: bigint }[] = [];
+  const startedAt = Date.now();
 
-  // Dedup set: txHash:logIndex
-  const seen = new Set<string>();
+  let rpcLogs: unknown[];
+  try {
+    rpcLogs = (await client.request({
+      method: 'eth_getLogs',
+      params: [{
+        address: contractAddresses as `0x${string}`[],
+        topics: [LIFECYCLE_EVENT_SIGNATURES as `0x${string}`[]],
+        fromBlock: `0x${fromBlock.toString(16)}`,
+        toBlock: `0x${toBlock.toString(16)}`,
+      }],
+    })) as unknown[];
+  } catch (error) {
+    // Re-throw, not swallow: the message carries the diagnosis, `cause` carries
+    // the provider's own error.
+    throw new Error(describeScanFailure({ chainId, fromBlock, toBlock, error }), {
+      cause: error,
+    });
+  }
 
-  // Process in batches
-  for (let start = fromBlock; start <= toBlock; start += BigInt(batchSize)) {
-    const end = start + BigInt(batchSize) - 1n > toBlock ? toBlock : start + BigInt(batchSize) - 1n;
+  for (const rpcLog of rpcLogs) {
+    const logData = rpcLog as {
+      address: string;
+      topics: `0x${string}`[];
+      data: `0x${string}`;
+      blockNumber: string;
+      transactionHash: `0x${string}`;
+      logIndex: string;
+      removed?: boolean;
+    };
 
-    try {
-      const rpcLogs = await client.request({
-        method: 'eth_getLogs',
-        params: [{
-          address: contractAddresses as `0x${string}`[],
-          topics: [LIFECYCLE_EVENT_SIGNATURES as `0x${string}`[]],
-          fromBlock: `0x${start.toString(16)}`,
-          toBlock: `0x${end.toString(16)}`,
-        }],
-      });
+    const rawLog: RawEventLog = {
+      address: logData.address,
+      topics: logData.topics as [`0x${string}`, ...`0x${string}`[]],
+      data: logData.data,
+      blockNumber: BigInt(logData.blockNumber),
+      transactionHash: logData.transactionHash,
+      logIndex: Number(logData.logIndex),
+      removed: logData.removed,
+    };
 
-      for (const rpcLog of rpcLogs as unknown[]) {
-        const logData = rpcLog as {
-          address: string;
-          topics: `0x${string}`[];
-          data: `0x${string}`;
-          blockNumber: string;
-          transactionHash: `0x${string}`;
-          logIndex: string;
-          removed?: boolean;
-        };
-
-        // Dedup
-        const dedupeKey = `${logData.transactionHash}:${logData.logIndex}`;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-
-        const rawLog: RawEventLog = {
-          address: logData.address,
-          topics: logData.topics as [`0x${string}`, ...`0x${string}`[]],
-          data: logData.data,
-          blockNumber: BigInt(logData.blockNumber),
-          transactionHash: logData.transactionHash,
-          logIndex: Number(logData.logIndex),
-          removed: logData.removed,
-        };
-
-        const domainEvent = buildCloseOrderEvent(chainId, logData.address.toLowerCase(), rawLog);
-        if (domainEvent) {
-          results.push({ event: domainEvent, blockNumber: rawLog.blockNumber });
-        }
-      }
-    } catch (error) {
-      log.warn({
-        chainId,
-        fromBlock: start.toString(),
-        toBlock: end.toString(),
-        error: error instanceof Error ? error.message : String(error),
-      }, 'Failed to fetch historical close order events for batch');
+    const domainEvent = buildCloseOrderEvent(chainId, logData.address.toLowerCase(), rawLog);
+    if (domainEvent) {
+      results.push({ event: domainEvent, blockNumber: rawLog.blockNumber });
     }
   }
 
-  // Sort by blockNumber, then logIndex
+  // Sort by blockNumber, then logIndex. One response cannot hold the same log
+  // twice, so the dedupe set the windowed version needed is gone; the sort
+  // stays, because "published in chain order" should be a property of this
+  // function rather than an accident of the provider's response order.
   results.sort((a, b) => {
     if (a.blockNumber !== b.blockNumber) {
       return a.blockNumber < b.blockNumber ? -1 : 1;
@@ -225,8 +318,10 @@ export async function fetchHistoricalCloseOrderEvents(options: {
     chainId,
     fromBlock: fromBlock.toString(),
     toBlock: toBlock.toString(),
+    blocksScanned: (toBlock - fromBlock + 1n).toString(),
     eventsFound: results.length,
-  }, 'Fetched historical close order events');
+    durationMs: Date.now() - startedAt,
+  }, 'Scanned close order events');
 
   return results;
 }

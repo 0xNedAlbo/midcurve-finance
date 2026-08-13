@@ -138,8 +138,6 @@ export function isSupportedChain(chainId: number): chainId is SupportedChainId {
 export interface CatchUpConfig {
   /** Whether catch-up is enabled (default: true) */
   enabled: boolean;
-  /** Maximum blocks per getLogs request (default: 10000, eth_getLogs provider limit) */
-  batchSizeBlocks: number;
   /**
    * How often the persisted close-order cursor is re-written from the pollers'
    * scanned watermark, in milliseconds (default: 60000).
@@ -157,7 +155,6 @@ export interface CatchUpConfig {
 export function getCatchUpConfig(): CatchUpConfig {
   return {
     enabled: process.env.CATCHUP_ENABLED !== 'false',
-    batchSizeBlocks: parseInt(process.env.CATCHUP_BATCH_SIZE_BLOCKS || '10000', 10),
     heartbeatIntervalMs: parseInt(process.env.CATCHUP_HEARTBEAT_INTERVAL_MS || '60000', 10),
   };
 }
