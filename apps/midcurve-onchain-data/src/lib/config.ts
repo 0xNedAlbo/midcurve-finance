@@ -47,7 +47,6 @@ export interface WorkerConfig {
 export interface OnchainDataConfig {
   rabbitmq: RabbitMQConfig;
   worker: WorkerConfig;
-  logLevel: string;
 }
 
 /**
@@ -90,7 +89,6 @@ export function getOnchainDataConfig(): OnchainDataConfig {
   return {
     rabbitmq: getRabbitMQConfig(),
     worker: getWorkerConfig(),
-    logLevel: process.env.LOG_LEVEL || 'info',
   };
 }
 

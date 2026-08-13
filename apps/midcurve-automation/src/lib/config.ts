@@ -48,7 +48,6 @@ export interface AutomationConfig {
   rabbitmq: RabbitMQConfig;
   worker: WorkerConfig;
   signer: SignerConfig;
-  logLevel: string;
 }
 
 /**
@@ -99,7 +98,6 @@ export function getAutomationConfig(): AutomationConfig {
     rabbitmq: getRabbitMQConfig(),
     worker: getWorkerConfig(),
     signer: getSignerConfig(),
-    logLevel: process.env.LOG_LEVEL || 'info',
   };
 }
 
