@@ -39,6 +39,15 @@
  * all makes it structural rather than three arguments about unrelated code that
  * have to be re-checked whenever something upstream moves. See #79.
  *
+ * The constraint behind that is @@unique([positionId, sourceEventKey]), and it
+ * carries no logType. So a handler must never write two keyed log rows for one
+ * event: the second is discarded silently, because skipDuplicates reports
+ * count: 0 identically for a suppressed replay and for a first-pass row that
+ * should have been written. Every handler below writes exactly one row, or one
+ * of a mutually exclusive pair (handleRegistered). If you need a second row for
+ * the same event, the uniqueness scope is a design question — not a detail to
+ * work around at the call site.
+ *
  * Message disposition — the two cases must stay distinguishable:
  * - Understood but not ours (no matching position, no matching order): logged at
  *   info/warn and acked. For a vault this is the normal case, since anyone can
