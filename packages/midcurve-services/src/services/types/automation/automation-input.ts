@@ -8,6 +8,8 @@
  * This file retains automation log types.
  */
 
+import type { PrismaTransactionClient } from '../../../clients/index.js';
+
 // =============================================================================
 // AUTOMATION LOG INPUT TYPES
 // =============================================================================
@@ -297,6 +299,39 @@ export interface CreateAutomationLogInput {
    * Platform-independent context (JSON)
    */
   context?: AutomationLogContext;
+
+  /**
+   * Identity of the on-chain log this entry was derived from —
+   * "{chainId}/{transactionHash}/{logIndex}", built with createSourceEventKey().
+   *
+   * Present makes the write idempotent: replaying the same on-chain event leaves
+   * one row rather than one per replay, enforced by
+   * @@unique([positionId, sourceEventKey]).
+   *
+   * Absent — the correct value for anything not derived from an on-chain event,
+   * such as user actions through the API or the executor's own entries — leaves
+   * the write unconstrained and repeatable. See #79.
+   */
+  sourceEventKey?: string;
+}
+
+/**
+ * Options passed alongside an automation log write.
+ *
+ * A trailing bag rather than positional parameters: these are two independent
+ * optional concerns, and appending a second optional parameter after `tx` reads
+ * as an accident at every call site.
+ */
+export interface AutomationLogWriteOptions {
+  /**
+   * Transaction client, when the log write belongs to an enclosing transaction
+   */
+  tx?: PrismaTransactionClient;
+
+  /**
+   * Source event key — see CreateAutomationLogInput.sourceEventKey
+   */
+  sourceEventKey?: string;
 }
 
 /**

@@ -12,6 +12,7 @@ import type { PrismaTransactionClient } from '../../clients/index.js';
 import { createServiceLogger, log } from '../../logging/index.js';
 import type { ServiceLogger } from '../../logging/index.js';
 import type {
+  AutomationLogWriteOptions,
   CreateAutomationLogInput,
   ListAutomationLogsOptions,
   OrderTriggeredContext,
@@ -128,42 +129,91 @@ export class AutomationLogService {
   // ============================================================================
 
   /**
-   * Creates a new automation log entry
+   * Creates a new automation log entry.
+   *
+   * When the input carries a sourceEventKey, the write is conflict-tolerant:
+   * replaying the same on-chain event leaves one row rather than one per replay.
+   *
+   * The mechanism is `createMany({ skipDuplicates: true })` — `ON CONFLICT DO
+   * NOTHING` — rather than catching P2002, and that is not a style preference.
+   * Every event-derived log write happens inside an enclosing `$transaction`
+   * alongside the state change it describes, and in PostgreSQL a constraint
+   * violation aborts the whole transaction server-side: catching the error would
+   * leave a dead transaction in which the accompanying `mergeState` also rolls
+   * back and every later statement fails. `ON CONFLICT DO NOTHING` conflicts
+   * without erroring, so the transaction stays healthy. See #79.
    *
    * @param input - Log creation input
-   * @returns The created log entry
+   * @param tx - Transaction client, when the write belongs to a transaction
+   * @returns true if a row was written, false if an identical source event had
+   *          already been logged for this position
    */
-  async log(input: CreateAutomationLogInput, tx?: PrismaTransactionClient): Promise<AutomationLog> {
+  async log(
+    input: CreateAutomationLogInput,
+    tx?: PrismaTransactionClient
+  ): Promise<boolean> {
     log.methodEntry(this.logger, 'log', {
       positionId: input.positionId,
       logType: input.logType,
       level: input.level,
+      sourceEventKey: input.sourceEventKey,
     });
+
+    const data = {
+      positionId: input.positionId,
+      closeOrderId: input.closeOrderId,
+      level: input.level,
+      logType: input.logType,
+      message: input.message,
+      context: input.context as unknown as Prisma.InputJsonValue,
+      sourceEventKey: input.sourceEventKey,
+    };
 
     try {
       const db = tx ?? this.prisma;
-      const result = await db.automationLog.create({
-        data: {
-          positionId: input.positionId,
-          closeOrderId: input.closeOrderId,
-          level: input.level,
-          logType: input.logType,
-          message: input.message,
-          context: input.context as unknown as Prisma.InputJsonValue,
-        },
+
+      // No source event — nothing to deduplicate against, and these writes must
+      // stay repeatable. A NULL key never participates in the unique index.
+      if (input.sourceEventKey === undefined) {
+        const result = await db.automationLog.create({ data });
+
+        this.logger.debug(
+          { id: result.id, positionId: result.positionId, logType: result.logType },
+          'Automation log created'
+        );
+
+        log.methodExit(this.logger, 'log', { id: result.id });
+        return true;
+      }
+
+      const { count } = await db.automationLog.createMany({
+        data: [data],
+        skipDuplicates: true,
       });
+      const created = count > 0;
 
-      this.logger.debug(
-        {
-          id: result.id,
-          positionId: result.positionId,
-          logType: result.logType,
-        },
-        'Automation log created'
-      );
+      if (created) {
+        this.logger.debug(
+          {
+            positionId: input.positionId,
+            logType: input.logType,
+            sourceEventKey: input.sourceEventKey,
+          },
+          'Automation log created'
+        );
+      } else {
+        this.logger.debug(
+          {
+            positionId: input.positionId,
+            logType: input.logType,
+            sourceEventKey: input.sourceEventKey,
+          },
+          'Automation log already recorded for this source event, skipping'
+        );
+      }
 
-      log.methodExit(this.logger, 'log', { id: result.id });
-      return result;
+      log.methodExit(this.logger, 'log', { created });
+      return created;
     } catch (error) {
       log.methodError(this.logger, 'log', error as Error, { input });
       throw error;
@@ -324,7 +374,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderCreatedContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderCreatedMessage(context);
     await this.log({
@@ -334,7 +384,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_CREATED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -344,7 +395,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderRegisteredContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderRegisteredMessage(context);
     await this.log({
@@ -354,7 +405,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_REGISTERED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -364,7 +416,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderTriggeredContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderTriggeredMessage(context);
     await this.log({
@@ -374,7 +426,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_TRIGGERED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -384,7 +437,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderExecutingContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderExecutingMessage(context);
     await this.log({
@@ -394,7 +447,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_EXECUTING,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -404,7 +458,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderExecutedContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderExecutedMessage(context);
     await this.log({
@@ -414,7 +468,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_EXECUTED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -424,7 +479,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderFailedContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderFailedMessage(context);
     await this.log({
@@ -434,7 +489,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_FAILED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -444,7 +500,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderCancelledContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderCancelledMessage(context);
     await this.log({
@@ -454,7 +510,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_CANCELLED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -464,7 +521,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderExpiredContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderExpiredMessage(context);
     await this.log({
@@ -474,7 +531,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_EXPIRED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -484,7 +542,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: OrderModifiedContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatOrderModifiedMessage(context);
     await this.log({
@@ -494,7 +552,8 @@ export class AutomationLogService {
       logType: AutomationLogType.ORDER_MODIFIED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -504,7 +563,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: RetryScheduledContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatRetryScheduledMessage(context);
     await this.log({
@@ -514,7 +573,8 @@ export class AutomationLogService {
       logType: AutomationLogType.RETRY_SCHEDULED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -524,7 +584,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: PreflightValidationContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatPreflightValidationMessage(context);
     await this.log({
@@ -534,7 +594,8 @@ export class AutomationLogService {
       logType: AutomationLogType.PREFLIGHT_VALIDATION,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   /**
@@ -544,7 +605,7 @@ export class AutomationLogService {
     positionId: string,
     closeOrderId: string,
     context: SimulationFailedContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatSimulationFailedMessage(context);
     await this.log({
@@ -554,14 +615,15 @@ export class AutomationLogService {
       logType: AutomationLogType.SIMULATION_FAILED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   async logExecutionSkipped(
     positionId: string,
     closeOrderId: string,
     context: ExecutionSkippedContext,
-    tx?: PrismaTransactionClient
+    opts: AutomationLogWriteOptions = {}
   ): Promise<void> {
     const message = this.formatWithOrderTag(
       context.orderTag,
@@ -574,7 +636,8 @@ export class AutomationLogService {
       logType: AutomationLogType.EXECUTION_SKIPPED,
       message,
       context,
-    }, tx);
+      sourceEventKey: opts.sourceEventKey,
+    }, opts.tx);
   }
 
   // ============================================================================
