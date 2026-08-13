@@ -16,7 +16,7 @@ import { SharedContractService, EvmConfig } from '@midcurve/services';
 import { SharedContractNameEnum, type EvmSmartContractConfigData } from '@midcurve/shared';
 import { onchainDataLogger, priceLog } from '../../lib/logger';
 import {
-  getCatchUpConfig,
+  getCloseOrderCursorConfig,
   isSupportedChain,
   SUPPORTED_CHAIN_IDS,
 } from '../../lib/config';
@@ -232,10 +232,10 @@ export class CloseOrderSubscriber {
    * Start the block tracking heartbeat timer.
    */
   private startBlockTracking(): void {
-    const config = getCatchUpConfig();
+    const config = getCloseOrderCursorConfig();
 
     if (!config.enabled) {
-      log.info({ msg: 'Close order block tracking disabled (catch-up disabled)' });
+      log.info({ msg: 'Close order cursor heartbeat disabled by configuration' });
       return;
     }
 
