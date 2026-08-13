@@ -9,6 +9,11 @@ import type { PrismaClient } from '@midcurve/database';
  * assert what the *caller* observes when reconciliation fails. Everything
  * between the entry point and that block is stubbed: it is RPC-bound and not
  * what is under test here.
+ *
+ * The behaviour they pin used to be the opposite. A missing registration, an
+ * RPC outage and a defect all resolved as success, and the position was
+ * returned with an empty close-order list — the positive claim that there are
+ * none, rather than the fact that we could not find out.
  */
 describe('UniswapV3PositionService — close-order reconciliation failures', () => {
     const POSITION_ID = 'pos-1';
@@ -93,45 +98,103 @@ describe('UniswapV3PositionService — close-order reconciliation failures', () 
         stubRefreshPath(service);
     });
 
-    describe('CHARACTERIZATION — current behaviour, before the fix', () => {
-        it('swallows an RPC failure in the chain read and resolves as if nothing happened', async () => {
+    // Requirements (1), (3) and (4) of the issue: the failure reaches the
+    // caller instead of being reported as a position with no close orders.
+    describe('a failed chain read', () => {
+        it('propagates an RPC failure rather than resolving', async () => {
             closeOrderService.fetchChainSnapshot.mockRejectedValue(
                 new Error('HTTP request failed: 503 Service Unavailable'),
             );
 
-            // The defect: a failed read resolves, and the caller cannot tell.
-            await expect(service.refresh(POSITION_ID)).resolves.toBeDefined();
+            await expect(service.refresh(POSITION_ID)).rejects.toThrow('503 Service Unavailable');
+        });
+
+        it('does not reconcile against a snapshot it failed to read', async () => {
+            closeOrderService.fetchChainSnapshot.mockRejectedValue(new Error('boom'));
+
+            await expect(service.refresh(POSITION_ID)).rejects.toThrow();
             expect(closeOrderService.reconcileChainSnapshot).not.toHaveBeenCalled();
         });
 
-        it('swallows a missing closer registration, which reaches it as a thrown error', async () => {
-            closeOrderService.fetchChainSnapshot.mockRejectedValue(
-                new Error('No UniswapV3PositionCloser contract found for chain 42161'),
-            );
+        it('never falls back to reading the chain from inside the transaction', async () => {
+            closeOrderService.fetchChainSnapshot.mockRejectedValue(new Error('boom'));
 
-            // A knowable fact — the contract row is absent — arrives as an
-            // exception and is then discarded. Same observable as an outage.
+            await expect(service.refresh(POSITION_ID)).rejects.toThrow();
+            // The old fallback called closeOrderService.refresh() with the
+            // transaction client — RPC inside the write transaction, reachable
+            // only once the read had already failed.
+            expect(closeOrderService.refresh).not.toHaveBeenCalled();
+        });
+    });
+
+    // Requirement (2), as amended: a checked, logged state — not an exception,
+    // and not a branch that silently does less work.
+    describe('no closer contract registered for the chain', () => {
+        it('completes the refresh instead of failing it', async () => {
+            closeOrderService.fetchChainSnapshot.mockResolvedValue({
+                status: 'unavailable',
+                reason: 'no-closer-contract',
+                chainId: 42161,
+                contractName: 'UniswapV3PositionCloser',
+            });
+
             await expect(service.refresh(POSITION_ID)).resolves.toBeDefined();
         });
 
+        it('skips reconciliation rather than reconciling against nothing', async () => {
+            closeOrderService.fetchChainSnapshot.mockResolvedValue({
+                status: 'unavailable',
+                reason: 'no-closer-contract',
+                chainId: 42161,
+                contractName: 'UniswapV3PositionCloser',
+            });
+
+            await service.refresh(POSITION_ID);
+            expect(closeOrderService.reconcileChainSnapshot).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('a failed reconciliation', () => {
         // Caveat, so this test is not read as more than it is: a mocked Prisma
         // cannot reproduce PostgreSQL aborting the transaction. Against a real
-        // database the `findById` below this catch does not return — it throws
-        // 25P02, and the caller gets a raw ConnectorError instead of the
-        // "non-fatal" story the log tells. That was established separately
-        // against PostgreSQL 16.10 / Prisma 6.19.0; see the PR.
+        // database the statements after a failed write do not run at all —
+        // they throw 25P02. That was established separately against PostgreSQL
+        // 16.10 / Prisma 6.19.0; see the PR.
         //
-        // What this test does pin is the control flow: the catch exists, it
-        // discards the cause, and the method goes on to return normally.
-        it('swallows a reconciliation failure raised inside the write transaction', async () => {
-            closeOrderService.fetchChainSnapshot.mockResolvedValue({ positionId: POSITION_ID });
+        // What this pins is that the caller is told: the error carries its own
+        // cause instead of being relabelled by a catch and rediscovered later.
+        it('propagates the database error with its cause intact', async () => {
+            closeOrderService.fetchChainSnapshot.mockResolvedValue({
+                status: 'ok',
+                snapshot: { positionId: POSITION_ID },
+            });
             closeOrderService.reconcileChainSnapshot.mockRejectedValue(
-                Object.assign(new Error('Unique constraint failed on the fields: (`orderIdentityHash`)'), {
-                    code: 'P2002',
-                }),
+                Object.assign(
+                    new Error('Unique constraint failed on the fields: (`orderIdentityHash`)'),
+                    { code: 'P2002' },
+                ),
             );
 
+            await expect(service.refresh(POSITION_ID)).rejects.toThrow('orderIdentityHash');
+        });
+    });
+
+    describe('the happy path still reconciles', () => {
+        it('passes the snapshot it read to reconciliation', async () => {
+            const snapshot = { positionId: POSITION_ID, slots: [] };
+            closeOrderService.fetchChainSnapshot.mockResolvedValue({ status: 'ok', snapshot });
+            closeOrderService.reconcileChainSnapshot.mockResolvedValue({
+                orders: [],
+                created: 0,
+                updated: 0,
+                deleted: 0,
+            });
+
             await expect(service.refresh(POSITION_ID)).resolves.toBeDefined();
+            expect(closeOrderService.reconcileChainSnapshot).toHaveBeenCalledWith(
+                snapshot,
+                expect.anything(),
+            );
         });
     });
 });
