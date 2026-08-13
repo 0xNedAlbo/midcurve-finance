@@ -185,8 +185,13 @@ type LogCall = (
   positionId: string,
   orderId: string,
   context: Record<string, unknown>,
-  tx?: unknown,
+  opts?: { tx?: unknown; sourceEventKey?: string },
 ) => Promise<void>;
+
+/** The write options a log call received — the 4th argument */
+function logOpts(call: unknown[]): { tx?: unknown; sourceEventKey?: string } {
+  return call[3] as { tx?: unknown; sourceEventKey?: string };
+}
 
 function buildRule() {
   const order = {
@@ -600,6 +605,92 @@ describe('UniswapV3ProcessCloseOrderEventsRule — NFT orders still work', () =>
     expect(input.orderIdentityHash).toBe(`uniswapv3/${CHAIN_ID}/${NFT_ID}/${ContractTriggerMode.LOWER}`);
     expect(input.config).toMatchObject({ chainId: CHAIN_ID, nftId: NFT_ID, contractAddress: CLOSER });
     expect(input.state.shares).toBeUndefined();
+  });
+});
+
+/**
+ * #79 — every log write carries the identity of the on-chain log it came from,
+ * so a replayed event leaves one row rather than one per replay.
+ *
+ * What these tests prove is that the key is derived and that two passes over one
+ * event derive the *same* key. They cannot prove the row is suppressed: the log
+ * service is a stub here, and suppression is a database constraint. That half is
+ * covered in automation-log-service.test.ts, and demonstrated against a real
+ * database once in the PR.
+ */
+describe('UniswapV3ProcessCloseOrderEventsRule — source event key', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => cb(txMock));
+    txMock.position.findMany.mockResolvedValue([
+      { id: NFT_POSITION, config: { chainId: CHAIN_ID, nftId: Number(NFT_ID), poolAddress: POOL } },
+    ]);
+    Object.assign(getDomainEventPublisher(), { publishDirect: vi.fn(async () => undefined) });
+  });
+
+  it('derives one key for two passes over the same vault config update', async () => {
+    const { rule, mocks } = buildRule();
+    mocks.order.findByOrderIdentityHash.mockResolvedValue(storedVaultOrder());
+    const event = vaultEvent('close-order.slippage-updated.uniswapv3-vault', {
+      oldSlippageBps: 100,
+      newSlippageBps: 250,
+    });
+
+    await processEvent(rule, event);
+    await processEvent(rule, event);
+
+    const calls = mocks.log.logOrderModified.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(logOpts(calls[0]!).sourceEventKey).toBe(`${CHAIN_ID}/0xdeadbeef/3`);
+    expect(logOpts(calls[1]!).sourceEventKey).toBe(logOpts(calls[0]!).sourceEventKey);
+  });
+
+  it('derives one key for two passes over the same NFT registration', async () => {
+    const { rule, mocks } = buildRule();
+
+    await processEvent(rule, nftRegistered());
+    await processEvent(rule, nftRegistered());
+
+    const calls = mocks.log.logOrderCreated.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(logOpts(calls[0]!).sourceEventKey).toBe(`${CHAIN_ID}/0xfeedface/1`);
+    expect(logOpts(calls[1]!).sourceEventKey).toBe(logOpts(calls[0]!).sourceEventKey);
+  });
+
+  // The constraint has no logType in it, so distinct logs sharing a transaction
+  // are the case that would break if the key were built from the tx hash alone.
+  it('gives two logs in one transaction two different keys', async () => {
+    const { rule, mocks } = buildRule();
+    mocks.order.findByOrderIdentityHash.mockResolvedValue(storedVaultOrder());
+    const first = vaultEvent('close-order.slippage-updated.uniswapv3-vault', {
+      oldSlippageBps: 100,
+      newSlippageBps: 250,
+    });
+    const second = {
+      ...(first as Record<string, unknown>),
+      logIndex: 4,
+    } as never;
+
+    await processEvent(rule, first);
+    await processEvent(rule, second);
+
+    const calls = mocks.log.logOrderModified.mock.calls;
+    expect(logOpts(calls[0]!).sourceEventKey).toBe(`${CHAIN_ID}/0xdeadbeef/3`);
+    expect(logOpts(calls[1]!).sourceEventKey).toBe(`${CHAIN_ID}/0xdeadbeef/4`);
+  });
+
+  it('still passes the transaction client alongside the key', async () => {
+    const { rule, mocks } = buildRule();
+    mocks.order.findByOrderIdentityHash.mockResolvedValue(storedVaultOrder());
+
+    await processEvent(
+      rule,
+      vaultEvent('close-order.cancelled.uniswapv3-vault', { owner: OWNER_A }),
+    );
+
+    const opts = logOpts(mocks.log.logOrderCancelled.mock.calls[0]!);
+    expect(opts.tx).toBe(txMock);
+    expect(opts.sourceEventKey).toBe(`${CHAIN_ID}/0xdeadbeef/3`);
   });
 });
 
