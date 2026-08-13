@@ -617,6 +617,14 @@ model AutomationLog {
   // Common: { triggerPrice, currentPrice, amounts, error, retryCount, ... }
   context Json?
 
+  // sourceEventKey: "{chainId}/{transactionHash}/{logIndex}" — the on-chain log this
+  // row was derived from. NULL for writes that have no source event (user actions,
+  // executor-side entries), which stay unconstrained and repeatable.
+  // Uniqueness is per-position via @@unique([positionId, sourceEventKey]), matching
+  // the PositionLedgerEvent precedent above. Built with createSourceEventKey(); see #79.
+  sourceEventKey String?
+
+  @@unique([positionId, sourceEventKey]) // Replayed on-chain events write one row, not one per replay
   // Indexes for efficient queries
   @@index([positionId, createdAt])
   @@index([positionId, level, createdAt])

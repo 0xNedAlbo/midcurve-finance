@@ -29,6 +29,25 @@
  * Any config-change event on a failed order resets it to monitoring,
  * allowing the user to reactivate failed orders by updating any field.
  *
+ * Replay safety: every log write here carries a sourceEventKey derived from the
+ * event's (chainId, transactionHash, logIndex), so processing one on-chain event
+ * any number of times leaves one row per handler rather than one per replay. The
+ * row handling was already idempotent — mergeState and upsertByIdentityHash both
+ * are — and the automation log was the last consumer that was not. Three of the
+ * four lifecycle handlers were replay-safe by accident (registration
+ * short-circuits on state, cancel and execute find a deleted row); keying them
+ * all makes it structural rather than three arguments about unrelated code that
+ * have to be re-checked whenever something upstream moves. See #79.
+ *
+ * The constraint behind that is @@unique([positionId, sourceEventKey]), and it
+ * carries no logType. So a handler must never write two keyed log rows for one
+ * event: the second is discarded silently, because skipDuplicates reports
+ * count: 0 identically for a suppressed replay and for a first-pass row that
+ * should have been written. Every handler below writes exactly one row, or one
+ * of a mutually exclusive pair (handleRegistered). If you need a second row for
+ * the same event, the uniqueness scope is a design question — not a detail to
+ * work around at the call site.
+ *
  * Message disposition — the two cases must stay distinguishable:
  * - Understood but not ours (no matching position, no matching order): logged at
  *   info/warn and acked. For a vault this is the normal case, since anyone can
@@ -49,6 +68,7 @@ import {
   createCloseOrderIdentityHash,
   deriveCloseOrderHashFromTick,
   generateOrderTagFromTick,
+  sourceEventKeyForCloseOrderEvent,
   getDomainEventPublisher,
   createDomainEvent,
   EXCHANGE_CLOSE_ORDER_EVENTS,
@@ -764,7 +784,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             slippageBps: payload.slippageBps,
             chainId,
           } satisfies OrderCreatedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       } else if (orderTag) {
         await this.automationLogService.logOrderRegistered(
@@ -775,7 +795,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             registrationTxHash: transactionHash,
             chainId,
           } satisfies OrderRegisteredContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -837,7 +857,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             reason: 'on-chain cancellation',
             chainId: event.chainId,
           } satisfies OrderCancelledContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -907,7 +927,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
               ? { sharesClosed: event.payload.sharesClosed }
               : {}),
           } satisfies OrderExecutedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -1029,7 +1049,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             changes: 'operator address',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -1072,7 +1092,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             changes: 'payout address',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -1134,7 +1154,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             changes: 'trigger tick',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -1181,7 +1201,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             changes: 'valid-until',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -1229,7 +1249,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             newSlippageBps: event.payload.newSlippageBps,
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -1275,7 +1295,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             changes: 'swap intent',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 
@@ -1327,7 +1347,7 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
             changes: 'shares',
             chainId: event.chainId,
           } satisfies OrderModifiedContext,
-          tx
+          { tx, sourceEventKey: sourceEventKeyForCloseOrderEvent(event) }
         );
       }
 

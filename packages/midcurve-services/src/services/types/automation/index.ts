@@ -34,5 +34,6 @@ export type {
   // Union and inputs
   AutomationLogContext,
   CreateAutomationLogInput,
+  AutomationLogWriteOptions,
   ListAutomationLogsOptions,
 } from './automation-input.js';
