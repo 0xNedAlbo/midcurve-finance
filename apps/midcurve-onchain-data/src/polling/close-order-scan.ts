@@ -212,6 +212,28 @@ function describeScanFailure(options: {
   const { chainId, fromBlock, toBlock, error } = options;
   const range = `chain ${chainId} over blocks ${fromBlock}-${toBlock} in a single eth_getLogs call`;
 
+  // `instanceof` holds because viem 2.39.3 lets a timeout through unwrapped, at
+  // all three hops between the fetch and us:
+  //
+  //   1. utils/rpc/http.js wraps the fetch in withTimeout({ errorInstance: new
+  //      TimeoutError(...) }), and its catch re-throws `err instanceof
+  //      TimeoutError` BEFORE the HttpRequestError wrap below it.
+  //   2. clients/transports/http.js does not catch around rpcClient.request —
+  //      it only throws RpcRequestError when the JSON-RPC body carries `error`.
+  //   3. utils/buildRequest.js switches on `err.code`; TimeoutError has none
+  //      (it extends BaseError), so it reaches `default`, where
+  //      `err_ instanceof BaseError` re-throws it as-is. Only non-BaseError
+  //      errors become UnknownRpcError. withRetry at retryCount 0 rejects with
+  //      the original error.
+  //
+  // Worth checking again on a viem upgrade: if a timeout ever arrives wrapped,
+  // this branch stops firing and a timed-out sweep gets the plan-blaming message
+  // below — the exact wrong diagnosis this branch exists to prevent, and one
+  // nobody would hit in practice at 703ms against a 120s budget. Pinned
+  // empirically against a real socket in close-order-scan.viem-timeout.test.ts.
+  //
+  // Class identity is single-copy: @midcurve/onchain-data has no nested viem, so
+  // the transport and this file resolve the same hoisted module.
   if (error instanceof TimeoutError) {
     return (
       `Close order scan timed out after ${SCAN_TIMEOUT_MS} ms for ${range}. ` +
