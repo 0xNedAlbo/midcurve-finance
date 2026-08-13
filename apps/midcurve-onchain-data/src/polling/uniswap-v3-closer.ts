@@ -50,20 +50,28 @@ export class UniswapV3CloserPollingBatch {
   /**
    * Whether a poll cycle has actually scanned a range on this batch.
    *
-   * `lastProcessedBlock` is seeded from the chain head when the cache holds no
-   * cursor (see `start()`), and at that moment nothing has been scanned. The
-   * flag separates "this is where we start looking" from "this is what we have
-   * looked at", so the heartbeat can only ever persist the latter.
+   * `lastProcessedBlock` starts as the persisted cursor, or null when there is
+   * none — and null means "scan from block 0", not "we are up to date". Nothing
+   * has been scanned at that point either way. The flag separates "this is where
+   * we start looking" from "this is what we have looked at", so the heartbeat
+   * can only ever persist the latter.
    *
-   * Edge worth knowing: with no cached cursor AND catch-up disabled, this stays
-   * false for a full poll interval, so nothing is persisted and a restart in
-   * that window re-seeds from the head — the same skip, bounded to one interval
-   * instead of unbounded. In normal operation catch-up writes the cursor before
-   * any poller starts, so the window never opens. The cold-start cursor does
-   * therefore still depend on catch-up having run; what no longer depends on it
-   * is every subsequent restart.
+   * The cold-start window this used to describe — nothing persisted for a full
+   * poll interval on an empty cache, because catch-up wrote the first cursor —
+   * closed with the immediate first sweep in `start()` (#88).
    */
   private hasCompletedScan = false;
+
+  /**
+   * Whether a sweep is in flight.
+   *
+   * A cold-cursor sweep can run for up to the scan timeout (120s) while
+   * CLOSER_POLL_INTERVAL_MS is 60s in the dev environment, so the interval can
+   * fire on top of a sweep that has not finished. Two concurrent sweeps would
+   * race on the cursor write and the older one could land last, moving the
+   * cursor backwards over blocks that were already published.
+   */
+  private isPolling = false;
 
   constructor(chainId: number, contracts: CloserContractInfo[]) {
     this.chainId = chainId;
@@ -72,46 +80,65 @@ export class UniswapV3CloserPollingBatch {
 
   /**
    * Start polling for events.
-   * Loads last processed block from cache and begins periodic polling.
+   *
+   * Loads the cursor, arms the interval, and fires the first sweep immediately —
+   * without awaiting it. Both halves of that carry weight:
+   *
+   * - Without the immediate sweep, nothing is scanned for a full
+   *   CLOSER_POLL_INTERVAL_MS (one hour by default) after startup. Deleting the
+   *   catch-up without this would have traded one startup defect for another,
+   *   invisibly, since an unscanned range logs identically to an empty one.
+   * - Without "not awaited", CloseOrderSubscriber's sequential start loop would
+   *   make each chain's poller wait for the previous chain's full-history sweep,
+   *   which is the backfill-blocks-polling defect this replaced. See #88.
+   *
+   * An empty cache leaves the cursor null, which `poll()` reads as block 0. The
+   * historical range is scanned by the poller now; nothing else scans it.
    */
   async start(): Promise<void> {
     if (this.isRunning) return;
 
-    // Load last processed block from cache
+    // No cursor means no scan has happened for this chain, so the sweep starts
+    // at genesis. It is one request either way (#88).
     this.lastProcessedBlock = await getCloseOrderLastProcessedBlock(this.chainId);
-
-    if (this.lastProcessedBlock === null) {
-      // First run: start from current block (catch-up handles historical)
-      const evmConfig = EvmConfig.getInstance();
-      const client = evmConfig.getPublicClient(this.chainId);
-      this.lastProcessedBlock = await client.getBlockNumber();
-
-      log.info({
-        chainId: this.chainId,
-        startBlock: this.lastProcessedBlock.toString(),
-        msg: 'No cached block, starting from current block',
-      });
-    }
 
     this.isRunning = true;
 
     this.pollTimer = setInterval(() => {
-      this.poll().catch((err) => {
-        log.error({
-          chainId: this.chainId,
-          error: err instanceof Error ? err.message : String(err),
-          msg: 'Error polling close order events',
-        });
-      });
+      void this.runPoll();
     }, POLL_INTERVAL_MS);
 
     log.info({
       chainId: this.chainId,
       intervalMs: POLL_INTERVAL_MS,
       contractCount: this.contractAddresses.length,
-      lastBlock: this.lastProcessedBlock.toString(),
+      lastBlock: this.lastProcessedBlock?.toString() ?? 'none, scanning from block 0',
       msg: 'Started close order polling',
     });
+
+    // Deliberately not awaited — see the note above.
+    void this.runPoll();
+  }
+
+  /**
+   * Worker entry point for one poll cycle: everything below throws, and this is
+   * where it becomes a log line.
+   *
+   * A failed sweep or a failed publish leaves the cursor untouched, so the same
+   * range is retried on the next tick. That is the point — the previous
+   * behaviour reported "0 events found" and moved on.
+   */
+  private async runPoll(): Promise<void> {
+    try {
+      await this.poll();
+    } catch (err) {
+      log.error({
+        chainId: this.chainId,
+        error: err instanceof Error ? err.message : String(err),
+        cause: err instanceof Error && err.cause instanceof Error ? err.cause.message : undefined,
+        msg: 'Close order poll failed, cursor left unchanged',
+      });
+    }
   }
 
   /**
@@ -161,16 +188,32 @@ export class UniswapV3CloserPollingBatch {
   }
 
   /**
-   * Single poll cycle: fetch events from lastBlock+1 → currentBlock.
+   * Single poll cycle: fetch events from lastBlock+1 → currentBlock, or from
+   * block 0 when there is no cursor yet.
    */
   private async poll(): Promise<void> {
-    if (this.lastProcessedBlock === null) return;
+    if (this.isPolling) {
+      log.warn({
+        chainId: this.chainId,
+        msg: 'Close order sweep still in flight, skipping this tick',
+      });
+      return;
+    }
 
+    this.isPolling = true;
+    try {
+      await this.sweep();
+    } finally {
+      this.isPolling = false;
+    }
+  }
+
+  private async sweep(): Promise<void> {
     const evmConfig = EvmConfig.getInstance();
     const client = evmConfig.getPublicClient(this.chainId);
     const currentBlock = await client.getBlockNumber();
 
-    const fromBlock = this.lastProcessedBlock + 1n;
+    const fromBlock = this.lastProcessedBlock === null ? 0n : this.lastProcessedBlock + 1n;
     if (fromBlock > currentBlock) return;
 
     const events = await fetchHistoricalCloseOrderEvents({
