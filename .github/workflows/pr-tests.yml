@@ -108,6 +108,15 @@ jobs:
       # tool produces, and the message names the one command that fixes it.
       # Contrast the Foundry pin below, where an upstream change produces a red
       # about code nobody touched with nothing the reader can act on.
+      # TEMPORARY — removed with the probe commit that added it. The step below
+      # uses a bare `git diff`, which is only safe if nothing earlier in the job
+      # writes to a tracked path. Read it rather than assume it. See #92.
+      - name: 'PROBE: is the working tree clean at this point?'
+        run: |
+          echo '--- git status --porcelain ---'
+          git status --porcelain
+          echo '--- end (nothing between the markers means clean) ---'
+
       - name: Verify prisma schema is formatted
         run: |
           pnpm --filter @midcurve/database db:format

@@ -238,8 +238,8 @@ model Position {
   positionHash String?
 
   // PnL related fields (stored as string for bigint precision)
-  currentValue  String // bigint as string
-  costBasis     String // bigint as string
+  currentValue String // bigint as string
+  costBasis String // bigint as string
   realizedPnl   String // bigint as string
   unrealizedPnl String // bigint as string
 
