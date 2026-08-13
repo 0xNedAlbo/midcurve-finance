@@ -24,6 +24,7 @@
     "dev:signer": "turbo run dev --filter=@midcurve/signer",
     "dev:business-logic": "turbo run dev --filter=@midcurve/business-logic",
     "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
     "check:test-manifest": "node scripts/check-test-manifest.mjs"
   },
   "author": "",

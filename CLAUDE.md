@@ -74,6 +74,94 @@ sources and is *not* in vitest's default `exclude`.
 
 Rationale and the failures behind each check: [#91](https://github.com/0xNedAlbo/midcurve-finance/issues/91).
 
+## Lint in CI
+
+CI runs `pnpm lint` (`turbo run lint`). Enrolment is self-serving: a package
+with an ESLint config and a `lint` script is picked up automatically, one
+without is skipped. **`@midcurve/ui` is the only enrolled package today.**
+
+**Most packages have no ESLint config, and that is deliberate — not an
+oversight.** They are covered by `turbo run typecheck`, which catches the
+class of defect that actually matters here; adding configs is what generates
+a large first-run backlog, and nobody has asked for lint on those packages.
+Whoever wants it for a package adds a config and a script.
+
+The exceptions, so the gap is on the record rather than implied away:
+**`@midcurve/contracts` and `@midcurve/database` declare no `typecheck`
+script either**, so their hand-written TypeScript — the deploy and ops
+scripts under `apps/midcurve-contracts/scripts/` and the Prisma seed and
+backfill scripts — is covered by neither lint nor typecheck.
+
+There is no lint manifest, and one would add a mechanism without adding a
+guarantee. `test-manifest.json` exists because `pnpm -r test:run` cannot see
+a package that has tests and no script — absence is invisible there. Lint has
+no equivalent blind spot, and the `Show which packages lint covers` step
+prints the enrolled set on every run. That step is not decoration either:
+turbo's own output reads `Running lint in 12 packages` while linting one,
+because it counts packages in scope rather than packages with the task.
+
+**That step also fails the build when the enrolled set is empty**, which is
+what makes it a check rather than a printout. Deleting `@midcurve/ui`'s
+`lint` script is a one-line edit, and without the assertion it would leave
+`pnpm lint` reporting `0 successful, 0 total` in 116ms — green, and
+indistinguishable from a gate that ran. If you are removing lint on purpose,
+remove that step and the `Lint` step with it rather than letting the set go
+to zero.
+
+**The gate covers errors. Warnings are not a gate, they are a reading, and
+they do not fail CI.** No `--max-warnings 0`: a warning ceiling over a backlog
+nobody intends to clear, or a ratchet at today's count that drifts the moment
+anyone edits the file, is decoration rather than enforcement.
+
+### Rules demoted to `warn`, and the line that stops there
+
+Recorded in one table so the total is visible in one place and falsifiable
+later, rather than as four sentences nobody adds up. All in `@midcurve/ui`.
+
+| rule | count | as of |
+|---|---|---|
+| `react-hooks/set-state-in-effect` | 48 | 2026-08-12 |
+| `react-hooks/exhaustive-deps` | 36 | 2026-08-12 (plugin default, not demoted by us) |
+| `@typescript-eslint/no-explicit-any` | 25 | 2026-08-12 |
+| `react-hooks/purity` | 3 | 2026-08-12 |
+
+Each was deferred because fixing it is design or UI-behaviour work that
+deserves its own review, not because it is unimportant. The compound effect
+is that **the gate fails on nothing currently in the tree**, which is worth
+saying out loud. Two things stop that being decoration:
+
+**It is not empty.** **78 rules stay at `error`** with zero current
+violations, and gate from the first run — `no-dupe-else-if`,
+`no-constant-binary-expression`, `no-async-promise-executor`,
+`@typescript-eslint/no-unsafe-declaration-merging`,
+`@typescript-eslint/no-misused-new`, and 73 others. "Catches nothing on
+today's tree" is true; "catches nothing" is false, and the difference is the
+whole value.
+
+Note what is *not* in that 78: typescript-eslint's `eslint-recommended`
+turns **off** the base rules tsc already enforces, so `no-dupe-keys`,
+`no-const-assign` and their kin read as severity 0 in the resolved config.
+That is deliberate deduplication, not a gap — those failures surface from
+`pnpm typecheck` instead. Check with
+`pnpm exec eslint --print-config <file>` before assuming a rule is live.
+
+**No further demotions.** This is the line. If a rule fires in future, fix
+the finding, or remove the rule with a stated reason. Do not lower its
+severity. A config that reaches green by demoting rules until nothing errors
+is the same artifact as a check that passes because it looked at three
+files, and [#91](https://github.com/0xNedAlbo/midcurve-finance/issues/91)
+and #92 were both spent removing those.
+
+Two hazards worth knowing before enrolling a package. ESLint's flat config
+does **not** read `.gitignore`, so build output must be listed in `ignores`
+explicitly or lint findings get attributed to generated code — for
+`@midcurve/ui` that was `dist/`, 162 of the 503 files it would otherwise
+have walked. In a Next.js package the same trap is `.next/standalone/`,
+which holds copies of *other* packages' sources; that is the lint-side twin
+of check D in the test manifest.
+
+Rationale and the state it was in beforehand: [#92](https://github.com/0xNedAlbo/midcurve-finance/issues/92).
+
 ## Architecture Docs
 For detailed architecture, auth flows, and design decisions:
 see [docs/architecture.md](docs/architecture.md) and package-level CLAUDE.md files.

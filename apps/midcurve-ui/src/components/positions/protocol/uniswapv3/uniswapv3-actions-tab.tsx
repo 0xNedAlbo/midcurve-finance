@@ -7,7 +7,7 @@ interface UniswapV3ActionsTabProps {
   position: UniswapV3PositionData;
 }
 
-export function UniswapV3ActionsTab({}: UniswapV3ActionsTabProps) {
+export function UniswapV3ActionsTab(_props: UniswapV3ActionsTabProps) {
   return (
     <div className="flex items-center justify-center min-h-[400px]">
       <div className="text-center space-y-4">
