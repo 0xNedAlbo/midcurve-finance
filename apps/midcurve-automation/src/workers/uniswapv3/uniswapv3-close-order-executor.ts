@@ -67,6 +67,15 @@ const log = automationLogger.child({ component: 'CloseOrderExecutor' });
 // Maximum number of execution attempts before marking order as permanently failed
 const MAX_EXECUTION_ATTEMPTS = 3;
 
+/**
+ * What `executeOrder` did, so the caller knows whether a post-execution
+ * position refresh is owed. `executed: false` means the order was skipped
+ * before any transaction was sent.
+ */
+type ExecutionOutcome =
+  | { executed: false }
+  | { executed: true; isVaultOrder: boolean };
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -229,6 +238,12 @@ export class CloseOrderExecutor {
 
     const closeOrderService = getUniswapV3CloseOrderService();
 
+    // Set when the close transaction is mined, and read after the try/catch
+    // below to do the post-execution refresh. It lives out here so that the
+    // refresh happens outside the execution-failure handler — see the note at
+    // the call site.
+    let executed: ExecutionOutcome | null = null;
+
     try {
       // Atomic CAS: monitoring|retrying → executing (increments executionAttempts)
       const transitioned = await closeOrderService.atomicTransitionToExecuting(orderId);
@@ -239,7 +254,8 @@ export class CloseOrderExecutor {
         return;
       }
 
-      await this.executeOrder(orderId, positionId, poolAddress, chainId, currentPrice, triggerPrice, triggerSide);
+      const outcome = await this.executeOrder(orderId, positionId, poolAddress, chainId, currentPrice, triggerPrice, triggerSide);
+      if (outcome.executed) executed = outcome;
 
       // Acknowledge successful processing
       await mq.ack(msg);
@@ -346,6 +362,35 @@ export class CloseOrderExecutor {
       }
 
       this.failedTotal++;
+    }
+
+    // Post-execution bookkeeping, deliberately outside the handler above.
+    //
+    // The close transaction is already mined and recorded by this point, so a
+    // failure here is not an execution failure. While this call sat inside that
+    // try, a refresh that threw would log ORDER_FAILED for an order that
+    // succeeded, transition it to retrying, and schedule a republish — which
+    // is what made #86's fix dangerous until the placement was corrected.
+    //
+    // The catch is the message-handler boundary, not a swallow: nothing here
+    // reports an empty close-order list to anyone as fact. The next refresh
+    // reconciles, and it will do so loudly now.
+    if (executed) {
+      try {
+        const positionService = executed.isVaultOrder
+          ? getVaultPositionService()
+          : getPositionService();
+        await positionService.refresh(positionId);
+      } catch (err) {
+        log.error(
+          {
+            orderId,
+            positionId,
+            error: err instanceof Error ? err.message : String(err),
+            msg: 'Post-execution position refresh failed — the order itself executed successfully',
+          },
+        );
+      }
     }
   }
 
@@ -462,7 +507,7 @@ export class CloseOrderExecutor {
     _currentPrice: string,
     triggerPrice: string,
     triggerSide: 'lower' | 'upper'
-  ): Promise<void> {
+  ): Promise<ExecutionOutcome> {
     const closeOrderService = getUniswapV3CloseOrderService();
     const automationSubscriptionService = getAutomationSubscriptionService();
     const signerClient = getSignerClient();
@@ -779,7 +824,7 @@ export class CloseOrderExecutor {
 
       // Transition back to monitoring — don't count as a failed attempt
       await closeOrderService.resetToMonitoring(orderId);
-      return;
+      return { executed: false };
     }
 
     // =========================================================================
@@ -1259,10 +1304,8 @@ export class CloseOrderExecutor {
       msg: 'Order executed successfully',
     });
 
-    if (isVaultOrder) {
-      await getVaultPositionService().refresh(positionId);
-    } else {
-      await getPositionService().refresh(positionId);
-    }
+    // The position refresh is done by the caller, after the message is acked
+    // and outside the execution-failure handler.
+    return { executed: true, isVaultOrder };
   }
 }
