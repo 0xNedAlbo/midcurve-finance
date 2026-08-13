@@ -83,12 +83,34 @@ function openDevLogFile(): pino.DestinationStream {
 
 /**
  * Build the development stream entries: stdout + logs/dev.log.
+ *
+ * Both entries carry an explicit level. pino filters twice — once at the
+ * logger, once per stream — and a multistream entry that supplies neither
+ * `level` nor `levelVal` is assigned info (30) by lib/multistream.js add(),
+ * whatever the logger's own level says. write() then stops at the first stream
+ * above the record's level, so a debug record (20) reaches nothing. That is
+ * #94: five months in which no debug record reached either destination while
+ * the logger reported debug as enabled.
+ *
+ * The cast is deliberate. LOG_LEVEL is a plain string and StreamEntry.level is
+ * typed pino.Level, which excludes 'silent'; multistream resolves 'silent' at
+ * runtime through its own streamLevels map, where it is Infinity. An unknown
+ * level string resolves to undefined here and silently disables the stream —
+ * but pino() rejects it a moment later, so the process fails loudly rather
+ * than starting deaf. Note the order: the destination is built, silently dead,
+ * before pino() throws, because it is an argument to it.
  */
 function buildDevStreams(
+  logLevel: string,
   stdout: pino.DestinationStream,
   file: pino.DestinationStream
 ): pino.StreamEntry[] {
-  return [{ stream: stdout }, { stream: file }];
+  const level = logLevel as pino.Level;
+
+  return [
+    { level, stream: stdout },
+    { level, stream: file },
+  ];
 }
 
 /**
@@ -125,7 +147,7 @@ export function createLogger(opts: CreateLoggerOptions): pino.Logger {
 
   return pino(
     config,
-    pino.multistream(buildDevStreams(opts.stdout, opts.openLogFile()))
+    pino.multistream(buildDevStreams(opts.logLevel, opts.stdout, opts.openLogFile()))
   );
 }
 
