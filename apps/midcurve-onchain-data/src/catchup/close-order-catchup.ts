@@ -1,45 +1,33 @@
 /**
- * Close Order Catch-Up Orchestrator
+ * Close Order Event Scan
  *
- * Coordinates the catch-up process for close order lifecycle events.
+ * Scans closer contracts for close order lifecycle events via eth_getLogs, and
+ * owns the per-chain cursor those scans resume from.
  *
- * FINALIZED BLOCKS ONLY: scans from cachedBlock to finalizedBlock and leaves
- * the cursor at the finalized block.
+ * THERE IS NO STARTUP CATCH-UP. It existed as a separate mechanism because the
+ * first poll faced the same block-window penalty as a backfill did. With the
+ * window gone, the first poll IS the catch-up:
+ * `UniswapV3CloserPollingBatch.poll()` scans `lastProcessedBlock + 1` →
+ * `client.getBlockNumber()`, and `start()` fires it immediately rather than
+ * waiting out an interval. See #88.
  *
- * The non-finalized range (finalizedBlock + 1 → chain head) is deliberately not
- * covered here. `UniswapV3CloserPollingBatch.poll()` scans
- * `lastProcessedBlock + 1` → `client.getBlockNumber()` — the chain head, not the
- * finalized head — so the poller picks up the remainder on its next cycle. A
- * second catch-up pass over the same range would only close a startup latency
- * window bounded by CLOSER_POLL_INTERVAL_MS, on a path that is itself a fallback
- * (primary delivery is receipt extraction in the API and the automation
- * executor). See #93.
- *
- * Unlike position-liquidity catch-up, this uses contract addresses (not nftId topics)
- * for eth_getLogs filtering, and decodes logs using the V100 ABI.
+ * Filtering is by contract address (not nftId topic), and logs are decoded with
+ * the V100 ABIs.
  */
 
-import {
-  EvmConfig,
-  EvmBlockService,
-  CacheService,
-  closeOrderRoutingKeyForEvent,
-} from '@midcurve/services';
+import { EvmConfig, CacheService } from '@midcurve/services';
 import {
   UniswapV3PositionCloserV100Abi,
   UniswapV3VaultPositionCloserV100Abi,
 } from '@midcurve/shared';
 import { keccak256, toHex } from 'viem';
 import { onchainDataLogger } from '../lib/logger';
-import { getRabbitMQConnection } from '../mq/connection-manager';
 import {
   buildCloseOrderEvent,
-  serializeCloseOrderEvent,
   type RawEventLog,
 } from '../mq/close-order-messages';
-import { getCatchUpConfig } from '../lib/config';
 
-const log = onchainDataLogger.child({ component: 'CloseOrderCatchUp' });
+const log = onchainDataLogger.child({ component: 'CloseOrderScan' });
 
 // ============================================================
 // Block Tracker (separate cache keys from position-liquidity)
@@ -89,55 +77,6 @@ export async function updateCloseOrderBlockIfHigher(chainId: number, blockNumber
   if (cached === null || blockNumber > cached) {
     await setCloseOrderLastProcessedBlock(chainId, blockNumber);
   }
-}
-
-// ============================================================
-// Catch-Up Result
-// ============================================================
-
-export interface CatchUpResult {
-  chainId: number;
-  eventsPublished: number;
-  fromBlock: bigint;
-  toBlock: bigint;
-  durationMs: number;
-  error?: string;
-}
-
-// ============================================================
-// Safety Margins
-// ============================================================
-
-const FINALITY_SAFETY_MARGINS: Record<number, bigint> = {
-  1: 64n,
-  42161: 64n,
-  8453: 64n,
-  56: 64n,
-  137: 128n,
-  10: 64n,
-};
-
-async function getFinalizedBlockNumber(chainId: number): Promise<bigint> {
-  const evmBlockService = new EvmBlockService();
-  const evmConfig = EvmConfig.getInstance();
-
-  let finalizedBlock = await evmBlockService.getLastFinalizedBlockNumber(chainId);
-
-  if (finalizedBlock === null) {
-    const client = evmConfig.getPublicClient(chainId);
-    const currentBlock = await client.getBlockNumber();
-    const safetyMargin = FINALITY_SAFETY_MARGINS[chainId] ?? 64n;
-    finalizedBlock = currentBlock - safetyMargin;
-
-    log.warn({
-      chainId,
-      currentBlock: currentBlock.toString(),
-      safetyMargin: safetyMargin.toString(),
-      pseudoFinalizedBlock: finalizedBlock.toString(),
-    }, 'Finalized block unavailable, using safety margin fallback');
-  }
-
-  return finalizedBlock;
 }
 
 // ============================================================
@@ -292,122 +231,3 @@ export async function fetchHistoricalCloseOrderEvents(options: {
   return results;
 }
 
-// ============================================================
-// Catch-Up Orchestrators
-// ============================================================
-
-/**
- * Execute catch-up for FINALIZED blocks.
- * Scans from cachedBlock to finalizedBlock.
- * Safe to run in background.
- */
-export async function executeCloseOrderCatchUpFinalized(
-  chainId: number,
-  contractAddresses: string[]
-): Promise<CatchUpResult> {
-  const startTime = Date.now();
-  const config = getCatchUpConfig();
-
-  log.info({ chainId, contractCount: contractAddresses.length }, 'Starting finalized close order catch-up (background)');
-
-  try {
-    const cachedBlock = await getCloseOrderLastProcessedBlock(chainId);
-
-    // Use block 0 as minimum boundary (contracts could be deployed at any point)
-    const fromBlock = cachedBlock !== null ? cachedBlock : 0n;
-
-    const finalizedBlock = await getFinalizedBlockNumber(chainId);
-
-    log.info({
-      chainId,
-      cachedBlock: cachedBlock?.toString() ?? 'none',
-      fromBlock: fromBlock.toString(),
-      finalizedBlock: finalizedBlock.toString(),
-    }, 'Finalized close order block range determined');
-
-    if (fromBlock >= finalizedBlock) {
-      log.info({ chainId }, 'No finalized blocks to catch up for close orders');
-      return { chainId, eventsPublished: 0, fromBlock, toBlock: finalizedBlock, durationMs: Date.now() - startTime };
-    }
-
-    const events = await fetchHistoricalCloseOrderEvents({
-      chainId,
-      contractAddresses,
-      fromBlock,
-      toBlock: finalizedBlock,
-      batchSize: config.batchSizeBlocks,
-    });
-
-    let publishedCount = 0;
-    const mq = getRabbitMQConnection();
-
-    for (const { event } of events) {
-      if (!event) continue;
-      try {
-        const routingKey = closeOrderRoutingKeyForEvent(event);
-        const content = serializeCloseOrderEvent(event);
-        await mq.publishCloseOrderEvent(routingKey, content);
-        publishedCount++;
-      } catch (error) {
-        log.warn({
-          chainId,
-          eventType: event.type,
-          nftId: event.nftId,
-          vaultAddress: event.vaultAddress,
-          ownerAddress: event.ownerAddress,
-          error: error instanceof Error ? error.message : String(error),
-        }, 'Failed to publish finalized close order catch-up event');
-      }
-    }
-
-    // Update cache with finalized block
-    await setCloseOrderLastProcessedBlock(chainId, finalizedBlock);
-
-    const durationMs = Date.now() - startTime;
-
-    log.info({
-      chainId,
-      fromBlock: fromBlock.toString(),
-      toBlock: finalizedBlock.toString(),
-      eventsFound: events.length,
-      eventsPublished: publishedCount,
-      durationMs,
-    }, 'Finalized close order catch-up completed');
-
-    return { chainId, eventsPublished: publishedCount, fromBlock, toBlock: finalizedBlock, durationMs };
-  } catch (error) {
-    const durationMs = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    log.error({ chainId, error: errorMessage, durationMs }, 'Finalized close order catch-up failed');
-    return { chainId, eventsPublished: 0, fromBlock: 0n, toBlock: 0n, durationMs, error: errorMessage };
-  }
-}
-
-// ============================================================
-// Multi-Chain Wrappers
-// ============================================================
-
-/**
- * Execute finalized catch-up for multiple chains.
- * Processes sequentially to avoid overwhelming RPC providers.
- */
-export async function executeCloseOrderCatchUpFinalizedForChains(
-  chainContracts: Map<number, string[]>
-): Promise<CatchUpResult[]> {
-  const config = getCatchUpConfig();
-  if (!config.enabled) {
-    log.info('Close order catch-up disabled by configuration');
-    return [];
-  }
-
-  const results: CatchUpResult[] = [];
-  for (const [chainId, addresses] of chainContracts) {
-    const result = await executeCloseOrderCatchUpFinalized(chainId, addresses);
-    results.push(result);
-  }
-
-  const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
-  log.info({ chainsProcessed: results.length, totalEvents }, 'Finalized close order catch-up completed for all chains');
-
-  return results;
-}
