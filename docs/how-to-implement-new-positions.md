@@ -129,7 +129,7 @@ The four-component decomposition is fixed (`realizedPnl` / `realizedCashflow` / 
 
 ### 2.4 Domain events
 
-Ledger events trigger downstream consumers (business-logic rules, APR service) via domain events on the `position-liquidity-events` exchange. The question to answer here is whether the existing event family suffices or whether the new protocol needs new routing keys, payload extensions, or a dedicated exchange.
+Ledger events trigger downstream consumers (business-logic rules, APR service) via domain events on the `domain-events` exchange. The question to answer here is whether the existing event family suffices or whether the new protocol needs new routing keys, payload extensions, or a dedicated exchange.
 
 Default answer: the existing infrastructure suffices. Routing keys follow the convention `position.liquidity.<protocol>.<eventType>`, and consumers filter by topic — adding a new protocol means adding a new `<protocol>` segment to the routing key, not a new exchange. The payload shape (positionId, eventId, eventType, blockNumber, txHash, plus event-specific `config`) generalises across protocols.
 

@@ -503,7 +503,9 @@ midcurve-automation/
 - Polling only - `eth_getLogs` for event-emitting sources, multicall/contract reads for state that doesn't emit events
 - DB-driven subscriptions - One `OnchainDataSubscribers` row per tracked entity; subscription IDs of the form `auto:{consumer}:{entityId}` per `.claude/rules/automation-workers.md`
 - Domain-event triggered - No interval timers; subscription syncing is driven by domain events
-- Publishes to RabbitMQ - exchanges include `pool-prices`, `position-liquidity-events`, `close-order-events`
+- Publishes to RabbitMQ - `pool-prices` and `close-order-events`
+
+> **`position-liquidity-events` no longer exists.** `1b195fa4` removed the exchange along with its only publisher (`PositionLiquiditySubscriber`) and its only consumer (`UpdatePositionOnLiquidityEventRule`); position liquidity tracking is on-demand via `refreshAllPositionLogs()` instead. Nothing in the repository declares, publishes to, or binds a queue to it — verified against the working tree on 2026-08-13, and there is no RabbitMQ definitions file that could declare it out of band. The name survives in a service-header **comment** in `docker-compose.yml` (line 105), which is a stale comment rather than a declaration; that file is #118's subject and is deliberately not edited here.
 
 **Directory Structure:**
 ```
@@ -556,7 +558,7 @@ midcurve-onchain-data/
 - Rule-based architecture - Abstract `BusinessRule` base class with lifecycle hooks
 - RuleRegistry - Manages rule registration, startup, shutdown
 - SchedulerService - Singleton cron scheduler with execution metrics
-- Consumes from RabbitMQ: `pool-prices`, `position-liquidity-events`, `close-order-events`, plus the domain-events exchange
+- Consumes from RabbitMQ: `pool-prices`, `close-order-events`, plus the `domain-events` exchange (`position-liquidity-events` went with `1b195fa4` — see the note under onchain-data above)
 
 **Directory Structure:**
 ```
