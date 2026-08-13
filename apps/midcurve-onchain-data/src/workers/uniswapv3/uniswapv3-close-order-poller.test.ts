@@ -80,7 +80,6 @@ import {
   getCloseOrderLastProcessedBlock,
   setCloseOrderLastProcessedBlock,
 } from '../../polling/close-order-scan';
-import { UniswapV3CloserPollingBatch } from '../../polling/uniswap-v3-closer';
 import { CloseOrderSubscriber } from './uniswapv3-close-order-poller';
 
 // =============================================================================
@@ -88,7 +87,6 @@ import { CloseOrderSubscriber } from './uniswapv3-close-order-poller';
 // =============================================================================
 
 const CHAIN_ID = 42161;
-const CLOSER_ADDRESS = '0x13d13B15BbE9b06C0279a7aB5f0a898EA3f25A40';
 
 /** Where the chain is now. The heartbeat must never persist this. */
 const CHAIN_HEAD = 250_000_000n;
@@ -102,7 +100,6 @@ const SCANNED_BLOCK = 249_000_000n;
  */
 interface SubscriberInternals {
   pollers: Array<{ chainId: number; getLastScannedBlock(): bigint | null }>;
-  contractsByChain: Map<number, string[]>;
   updateBlockTrackingHeartbeat(): Promise<void>;
 }
 
@@ -116,8 +113,6 @@ function subscriberWithPoller(scannedBlock: bigint | null): {
   internals.pollers = [
     { chainId: CHAIN_ID, getLastScannedBlock: () => scannedBlock },
   ];
-  // Populated on a real start(); the pre-fix heartbeat iterated this map.
-  internals.contractsByChain = new Map([[CHAIN_ID, [CLOSER_ADDRESS]]]);
 
   return { subscriber, internals };
 }
@@ -192,27 +187,8 @@ describe('CloseOrderSubscriber block-tracking heartbeat', () => {
   });
 });
 
-describe('UniswapV3CloserPollingBatch scanned watermark', () => {
-  beforeEach(() => {
-    cacheRows.clear();
-    vi.clearAllMocks();
-    getBlockNumberMock.mockResolvedValue(CHAIN_HEAD);
-  });
-
-  it('reports no scanned block while seeded from the chain head', async () => {
-    // No cached cursor, so start() seeds the polling position from the head.
-    // Nothing has been scanned at that point.
-    const batch = new UniswapV3CloserPollingBatch(CHAIN_ID, [
-      { address: CLOSER_ADDRESS, chainId: CHAIN_ID },
-    ]);
-
-    await batch.start();
-
-    try {
-      expect(batch.getStatus().lastProcessedBlock).toBe(CHAIN_HEAD.toString());
-      expect(batch.getLastScannedBlock()).toBeNull();
-    } finally {
-      await batch.stop();
-    }
-  });
-});
+// The batch's own watermark behaviour moved to
+// polling/uniswap-v3-closer.test.ts with #88. What lived here asserted that a
+// batch seeded from the chain head reports no scanned block — and #88 removed
+// the head seeding: an empty cursor now means "scan from block 0", which the
+// tests over there assert on the range that reaches eth_getLogs.
