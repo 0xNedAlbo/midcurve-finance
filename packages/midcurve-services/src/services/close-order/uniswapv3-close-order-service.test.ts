@@ -33,6 +33,14 @@ describe('UniswapV3CloseOrderService', () => {
     let sharedContractService: { findLatestByChainAndName: ReturnType<typeof vi.fn> };
     let service: UniswapV3CloseOrderService;
 
+    /** Spy on the service's own logger.error, silencing the output. */
+    const spyOnServiceError = () => {
+        const { logger } = service as unknown as {
+            logger: { error: (...args: unknown[]) => void };
+        };
+        return vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    };
+
     beforeEach(() => {
         prisma = {
             position: { findUnique: vi.fn().mockResolvedValue(nftPosition) },
@@ -167,6 +175,25 @@ describe('UniswapV3CloseOrderService', () => {
             expect(result.automationState).toBe('executed');
         });
 
+        it('reports the illegal transition at error with the state it found', async () => {
+            // Not a quiet branch. A guard that no-ops silently would just be a
+            // sixth swallow, in the state machine that moves money.
+            const errorLog = spyOnServiceError();
+
+            prisma.closeOrder.updateMany.mockResolvedValue({ count: 0 });
+            prisma.closeOrder.findUnique.mockResolvedValue({
+                id: ORDER_ID,
+                automationState: 'executed',
+            });
+
+            await service.transitionToRetrying(ORDER_ID, 'boom');
+
+            expect(errorLog).toHaveBeenCalledWith(
+                { id: ORDER_ID, expected: 'executing', found: 'executed' },
+                expect.stringContaining('Illegal transition'),
+            );
+        });
+
         it('throws when the order does not exist', async () => {
             prisma.closeOrder.updateMany.mockResolvedValue({ count: 0 });
             prisma.closeOrder.findUnique.mockResolvedValue(null);
@@ -205,6 +232,23 @@ describe('UniswapV3CloseOrderService', () => {
             const result = await service.markFailed(ORDER_ID, 'exhausted');
 
             expect(result.automationState).toBe('executed');
+        });
+
+        it('reports the illegal transition at error with the state it found', async () => {
+            const errorLog = spyOnServiceError();
+
+            prisma.closeOrder.updateMany.mockResolvedValue({ count: 0 });
+            prisma.closeOrder.findUnique.mockResolvedValue({
+                id: ORDER_ID,
+                automationState: 'executed',
+            });
+
+            await service.markFailed(ORDER_ID, 'exhausted');
+
+            expect(errorLog).toHaveBeenCalledWith(
+                { id: ORDER_ID, expected: 'retrying', found: 'executed' },
+                expect.stringContaining('Illegal transition'),
+            );
         });
     });
 });

@@ -1180,9 +1180,14 @@ export class UniswapV3CloseOrderService {
       }
 
       if (updateResult.count === 0) {
-        this.logger.warn(
-          { id, automationState: current.automationState },
-          'Order not in executing state — leaving it as is rather than transitioning to retrying',
+        // A miss is a finding, not a quiet branch: something attempted a
+        // transition that was not legal, in a state machine that moves money.
+        // Logged at error rather than thrown because the only caller is
+        // already handling a failure — throwing here would replace its
+        // diagnosis with this one.
+        this.logger.error(
+          { id, expected: 'executing', found: current.automationState },
+          'Illegal transition to retrying: order was not executing — left as is',
         );
         log.methodExit(this.logger, 'transitionToRetrying', { id, skipped: true });
         return current;
@@ -1259,9 +1264,13 @@ export class UniswapV3CloseOrderService {
       }
 
       if (updateResult.count === 0) {
-        this.logger.warn(
-          { id, automationState: current.automationState },
-          'Order not in retrying state — leaving it as is rather than marking it failed',
+        // Same reasoning as transitionToRetrying: a miss is a finding. Note
+        // that an order which failed that guard will fail this one too, so an
+        // illegal sequence reports twice — both attempts were illegal, and
+        // both are worth seeing.
+        this.logger.error(
+          { id, expected: 'retrying', found: current.automationState },
+          'Illegal transition to failed: order was not retrying — left as is',
         );
         log.methodExit(this.logger, 'markFailed', { id, skipped: true });
         return current;
