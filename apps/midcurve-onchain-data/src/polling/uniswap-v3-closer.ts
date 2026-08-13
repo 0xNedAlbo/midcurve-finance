@@ -184,8 +184,19 @@ export class UniswapV3CloserPollingBatch {
       const mq = getRabbitMQConnection();
       let publishedCount = 0;
 
-      // Per-event isolation: one unusable event must not take the rest of the
-      // batch down with it. Matches the catch-up publishers.
+      // A publish failure aborts the cycle, leaving the cursor where it was.
+      //
+      // This reverses the per-event isolation added in 34de883b. That change
+      // stopped one bad event killing the batch, and the rationale assumed
+      // event-specific publish failures exist. They do not:
+      // publishCloseOrderEvent throws only via getChannel() or a closed channel,
+      // both connection-wide, so the blast radius it isolated never had more
+      // than one member. What the isolation did buy was Defect 2b of #88 — an
+      // event decoded successfully, failed to publish, and was then lost
+      // permanently because the cursor advanced past it anyway.
+      //
+      // Replaying the whole range on the next cycle is the cost, and #79 made
+      // that idempotent for the automation log.
       for (const { event } of events) {
         if (!event) continue;
         try {
@@ -194,16 +205,23 @@ export class UniswapV3CloserPollingBatch {
           await mq.publishCloseOrderEvent(routingKey, content);
           publishedCount++;
         } catch (error) {
-          log.warn({
+          // Logged here rather than at the boundary because only this frame
+          // knows which event failed and how far the batch got. Then re-thrown:
+          // the cursor write below must not run.
+          log.error({
             chainId: this.chainId,
             eventType: event.type,
             nftId: event.nftId,
             vaultAddress: event.vaultAddress,
             ownerAddress: event.ownerAddress,
             txHash: event.transactionHash,
+            fromBlock: fromBlock.toString(),
+            toBlock: currentBlock.toString(),
+            publishedBeforeFailure: publishedCount,
             error: error instanceof Error ? error.message : String(error),
-            msg: 'Failed to publish close order event from poll, skipping',
+            msg: 'Failed to publish close order event, aborting poll with the cursor unchanged',
           });
+          throw error;
         }
       }
 
@@ -216,9 +234,10 @@ export class UniswapV3CloserPollingBatch {
       });
     }
 
-    // Update tracking. The range fromBlock→currentBlock has now been through
-    // eth_getLogs, so it is honest to both advance the watermark and let the
-    // heartbeat persist it.
+    // Update tracking. Reaching this line means the range fromBlock→currentBlock
+    // went through eth_getLogs AND every event it produced was published, so it
+    // is honest to both advance the watermark and let the heartbeat persist it.
+    // Either failure throws before here and the cursor stands.
     this.lastProcessedBlock = currentBlock;
     this.hasCompletedScan = true;
     await setCloseOrderLastProcessedBlock(this.chainId, currentBlock);
