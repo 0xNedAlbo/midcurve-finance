@@ -11,8 +11,6 @@ export {
   serializeCloseOrderEvent,
   triggerModeToString,
   swapDirectionToString,
-  // Constants
-  CLOSER_LIFECYCLE_EVENT_ABIS,
 } from '@midcurve/services';
 
 export type {
@@ -42,7 +40,6 @@ export type {
   OrderValidUntilUpdatedEvent,
   OrderSlippageUpdatedEvent,
   OrderSwapIntentUpdatedEvent,
-  AnyCloseOrderEvent,
   // Raw log type
   RawEventLog,
 } from '@midcurve/services';

@@ -14,10 +14,7 @@
  */
 
 import type { Channel } from 'amqplib';
-import {
-  EXCHANGE_CLOSE_ORDER_EVENTS,
-  buildCloseOrderRoutingKey,
-} from '@midcurve/services';
+import { EXCHANGE_CLOSE_ORDER_EVENTS } from '@midcurve/services';
 import { onchainDataLogger } from '../lib/logger';
 
 const log = onchainDataLogger.child({ component: 'Topology' });
@@ -30,7 +27,7 @@ const log = onchainDataLogger.child({ component: 'Topology' });
 export const EXCHANGE_POOL_PRICES = 'pool-prices';
 
 // Re-export close order topology from @midcurve/services
-export { EXCHANGE_CLOSE_ORDER_EVENTS, buildCloseOrderRoutingKey };
+export { EXCHANGE_CLOSE_ORDER_EVENTS };
 
 /**
  * Build a routing key for UniswapV3 swap events.
