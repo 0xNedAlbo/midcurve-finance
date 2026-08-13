@@ -79,7 +79,7 @@ vi.mock('@midcurve/services', async (importOriginal) => {
 import {
   getCloseOrderLastProcessedBlock,
   setCloseOrderLastProcessedBlock,
-} from '../../catchup/close-order-catchup';
+} from '../../polling/close-order-scan';
 import { UniswapV3CloserPollingBatch } from '../../polling/uniswap-v3-closer';
 import { CloseOrderSubscriber } from './uniswapv3-close-order-poller';
 

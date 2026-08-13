@@ -13,13 +13,17 @@
  * `chainId` is strictly redundant given a transaction hash, and included for the same
  * reason.
  *
- * Three producers publish close order events — the poller and the catch-up scanner
- * (which share fetchHistoricalCloseOrderEvents) and publishCloseOrderEventsFromReceipt
- * — and all three build their envelope through buildCloseOrderEvent. So live and
- * replayed copies of one on-chain log carry the same transactionHash and logIndex by
- * construction, and this key is stable across them. That is the property the whole
- * dedupe rests on; if a fourth producer is ever added, it goes through
- * buildCloseOrderEvent too.
+ * Two producers publish close order events — the fallback poller (via
+ * fetchHistoricalCloseOrderEvents) and publishCloseOrderEventsFromReceipt — and both
+ * build their envelope through buildCloseOrderEvent. So live and replayed copies of
+ * one on-chain log carry the same transactionHash and logIndex by construction, and
+ * this key is stable across them. That is the property the whole dedupe rests on; if
+ * a third producer is ever added, it goes through buildCloseOrderEvent too.
+ *
+ * It was three until #88 deleted the startup catch-up, which shared the poller's
+ * scanner. Replays now come from the poller re-scanning a range whose cursor did not
+ * advance — which this key makes idempotent, and which is exactly why the cursor is
+ * allowed to hold back.
  */
 
 /** The on-chain log a row was derived from */

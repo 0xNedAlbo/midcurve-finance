@@ -21,7 +21,7 @@ import {
   fetchHistoricalCloseOrderEvents,
   getCloseOrderLastProcessedBlock,
   setCloseOrderLastProcessedBlock,
-} from '../catchup/close-order-catchup';
+} from './close-order-scan';
 
 const log = onchainDataLogger.child({ component: 'UniswapV3CloserPoller' });
 

@@ -24,7 +24,7 @@ import {
   UniswapV3CloserPollingBatch,
   type CloserContractInfo,
 } from '../../polling/uniswap-v3-closer';
-import { updateCloseOrderBlockIfHigher } from '../../catchup/close-order-catchup';
+import { updateCloseOrderBlockIfHigher } from '../../polling/close-order-scan';
 
 const log = onchainDataLogger.child({ component: 'CloseOrderSubscriber' });
 
