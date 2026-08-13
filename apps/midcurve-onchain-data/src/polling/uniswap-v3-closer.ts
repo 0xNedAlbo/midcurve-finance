@@ -25,6 +25,26 @@ import {
 
 const log = onchainDataLogger.child({ component: 'UniswapV3CloserPoller' });
 
+/**
+ * The `error` field of a log line, never empty.
+ *
+ * amqplib's connection errors arrive with an empty `message`. Observed in the
+ * #88 publish-failure run: the line reporting a permanently lost publish carried
+ * `"error": ""` — blank in the one field an operator greps, on the one line that
+ * matters. The name is always there, and amqplib carries a `code` on some of
+ * them, so fall back to those rather than to nothing.
+ *
+ * Not an error taxonomy. Just never write an empty string where the diagnosis
+ * goes.
+ */
+function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  if (error.message) return error.message;
+
+  const code = (error as { code?: unknown }).code;
+  return code === undefined ? error.name : `${error.name} (code ${String(code)})`;
+}
+
 /** Polling interval for eth_getLogs reads (default: 1 hour, fallback safety net) */
 const POLL_INTERVAL_MS = parseInt(process.env.CLOSER_POLL_INTERVAL_MS || '3600000', 10);
 
@@ -134,8 +154,8 @@ export class UniswapV3CloserPollingBatch {
     } catch (err) {
       log.error({
         chainId: this.chainId,
-        error: err instanceof Error ? err.message : String(err),
-        cause: err instanceof Error && err.cause instanceof Error ? err.cause.message : undefined,
+        error: describeError(err),
+        cause: err instanceof Error && err.cause !== undefined ? describeError(err.cause) : undefined,
         msg: 'Close order poll failed, cursor left unchanged',
       });
     }
@@ -209,6 +229,16 @@ export class UniswapV3CloserPollingBatch {
   }
 
   private async sweep(): Promise<void> {
+    // The head read deliberately uses EvmConfig's shared client — viem's
+    // defaults, 10s and 3 retries — not the 120s client the sweep below builds
+    // for itself. It is one cheap call, and the long budget exists for a
+    // full-history eth_getLogs, not for this.
+    //
+    // The property that follows from it, worth stating rather than discovering:
+    // a hung provider surfaces here at 10s, not at 120s from the sweep. An
+    // unauthenticated key does the same — the #88 verification run failed on
+    // this line with a 401 on eth_blockNumber and never reached eth_getLogs, so
+    // the scan's own failure message never ran.
     const evmConfig = EvmConfig.getInstance();
     const client = evmConfig.getPublicClient(this.chainId);
     const currentBlock = await client.getBlockNumber();
@@ -261,7 +291,7 @@ export class UniswapV3CloserPollingBatch {
             fromBlock: fromBlock.toString(),
             toBlock: currentBlock.toString(),
             publishedBeforeFailure: publishedCount,
-            error: error instanceof Error ? error.message : String(error),
+            error: describeError(error),
             msg: 'Failed to publish close order event, aborting poll with the cursor unchanged',
           });
           throw error;

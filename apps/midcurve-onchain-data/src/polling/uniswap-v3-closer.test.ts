@@ -99,6 +99,24 @@ vi.mock('../mq/connection-manager', () => ({
   getRabbitMQConnection: () => ({ publishCloseOrderEvent: publishMock }),
 }));
 
+// Captures log records so the `error` field can be asserted on. It is the field
+// an operator greps, and it was blank on the line reporting a lost publish.
+const logRecords = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+
+vi.mock('../lib/logger', () => {
+  const record = (level: string) => (fields: Record<string, unknown>) => {
+    logRecords.push({ level, ...fields });
+  };
+  const child = (): Record<string, unknown> => ({
+    info: record('info'),
+    warn: record('warn'),
+    error: record('error'),
+    debug: record('debug'),
+    child,
+  });
+  return { onchainDataLogger: { child }, priceLog: {} };
+});
+
 vi.mock('../mq/close-order-messages', () => ({
   buildCloseOrderEvent: buildCloseOrderEventMock,
   serializeCloseOrderEvent: () => Buffer.from('{}'),
@@ -167,6 +185,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: 
 
 beforeEach(() => {
   cacheRows.clear();
+  logRecords.length = 0;
   vi.clearAllMocks();
   getBlockNumberMock.mockResolvedValue(CHAIN_HEAD);
   requestMock.mockResolvedValue([]);
@@ -284,6 +303,38 @@ describe('UniswapV3CloserPollingBatch cursor', () => {
 
     expect(await getCloseOrderLastProcessedBlock(CHAIN_ID)).toBe(CURSOR);
     expect(batch.getLastScannedBlock()).toBeNull();
+  });
+
+  it('never logs an empty error, even when the error carries no message', async () => {
+    await setCloseOrderLastProcessedBlock(CHAIN_ID, CURSOR);
+    requestMock.mockResolvedValue([RPC_LOG]);
+
+    // What amqplib actually threw during the #88 publish-failure run: a
+    // connection error with an empty message. It logged `"error": ""`.
+    const amqpError = Object.assign(new Error(''), { name: 'IllegalOperationError', code: 504 });
+    publishMock.mockRejectedValue(amqpError);
+
+    await batch.start();
+    await vi.waitFor(() => expect(publishMock).toHaveBeenCalled());
+
+    const abort = await vi.waitFor(() => {
+      const record = logRecords.find(
+        (r) => r.msg === 'Failed to publish close order event, aborting poll with the cursor unchanged'
+      );
+      expect(record).toBeDefined();
+      return record!;
+    });
+
+    expect(abort.error).not.toBe('');
+    expect(abort.error).toBe('IllegalOperationError (code 504)');
+
+    // Same shape at the boundary, and blank for the same reason before the fix.
+    const boundary = await vi.waitFor(() => {
+      const record = logRecords.find((r) => r.msg === 'Close order poll failed, cursor left unchanged');
+      expect(record).toBeDefined();
+      return record!;
+    });
+    expect(boundary.error).not.toBe('');
   });
 
   it('advances the cursor to the scanned head when the cycle succeeds', async () => {
