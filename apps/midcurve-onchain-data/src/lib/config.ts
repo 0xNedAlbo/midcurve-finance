@@ -129,17 +129,25 @@ export function isSupportedChain(chainId: number): chainId is SupportedChainId {
 }
 
 // ============================================================
-// Catch-Up Configuration
+// Close Order Cursor Configuration
 // ============================================================
 
 /**
- * Catch-up configuration for recovering missed events
+ * Configuration for the close-order cursor heartbeat.
+ *
+ * Named for the heartbeat because that is all it configures. It was
+ * CatchUpConfig, read from CATCHUP_*, until the startup catch-up was deleted in
+ * #88 — at which point the name pointed at a mechanism that no longer exists.
  */
-export interface CatchUpConfig {
-  /** Whether catch-up is enabled (default: true) */
+export interface CloseOrderCursorConfig {
+  /**
+   * Whether the cursor heartbeat runs (default: true).
+   *
+   * This no longer gates any scanning. The historical sweep belongs to the
+   * poller and has no switch: it is a safety net, and a safety net with an off
+   * button that looks like it turns off something else is how #88 started.
+   */
   enabled: boolean;
-  /** Maximum blocks per getLogs request (default: 10000, eth_getLogs provider limit) */
-  batchSizeBlocks: number;
   /**
    * How often the persisted close-order cursor is re-written from the pollers'
    * scanned watermark, in milliseconds (default: 60000).
@@ -152,12 +160,14 @@ export interface CatchUpConfig {
 }
 
 /**
- * Get catch-up configuration from environment
+ * Get close-order cursor configuration from environment
  */
-export function getCatchUpConfig(): CatchUpConfig {
+export function getCloseOrderCursorConfig(): CloseOrderCursorConfig {
   return {
-    enabled: process.env.CATCHUP_ENABLED !== 'false',
-    batchSizeBlocks: parseInt(process.env.CATCHUP_BATCH_SIZE_BLOCKS || '10000', 10),
-    heartbeatIntervalMs: parseInt(process.env.CATCHUP_HEARTBEAT_INTERVAL_MS || '60000', 10),
+    enabled: process.env.CLOSE_ORDER_CURSOR_HEARTBEAT_ENABLED !== 'false',
+    heartbeatIntervalMs: parseInt(
+      process.env.CLOSE_ORDER_CURSOR_HEARTBEAT_INTERVAL_MS || '60000',
+      10
+    ),
   };
 }

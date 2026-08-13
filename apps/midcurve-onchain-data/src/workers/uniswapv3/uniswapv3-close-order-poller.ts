@@ -7,16 +7,16 @@
  * Publishes incoming lifecycle events (registration, cancellation, config updates)
  * to RabbitMQ as structured domain events.
  *
- * Uses eth_getLogs polling instead of WebSocket subscriptions.
- * On startup, runs catch-up from cached block → current block, then starts
- * periodic polling for new events.
+ * Uses eth_getLogs polling instead of WebSocket subscriptions. There is no
+ * separate startup catch-up: each poller's first sweep covers everything from
+ * its cursor to the chain head, and starting a poller does not wait for it.
  */
 
 import { SharedContractService, EvmConfig } from '@midcurve/services';
 import { SharedContractNameEnum, type EvmSmartContractConfigData } from '@midcurve/shared';
 import { onchainDataLogger, priceLog } from '../../lib/logger';
 import {
-  getCatchUpConfig,
+  getCloseOrderCursorConfig,
   isSupportedChain,
   SUPPORTED_CHAIN_IDS,
 } from '../../lib/config';
@@ -24,10 +24,7 @@ import {
   UniswapV3CloserPollingBatch,
   type CloserContractInfo,
 } from '../../polling/uniswap-v3-closer';
-import {
-  executeCloseOrderCatchUpFinalizedForChains,
-  updateCloseOrderBlockIfHigher,
-} from '../../catchup/close-order-catchup';
+import { updateCloseOrderBlockIfHigher } from '../../polling/close-order-scan';
 
 const log = onchainDataLogger.child({ component: 'CloseOrderSubscriber' });
 
@@ -41,18 +38,15 @@ export class CloseOrderSubscriber {
   // Block tracking state (for cache updates)
   private blockTrackingTimer: NodeJS.Timeout | null = null;
 
-  // Track contract addresses by chain for catch-up
-  private contractsByChain: Map<number, string[]> = new Map();
-
   /**
    * Start the subscriber.
-   * Loads active closer contracts, runs catch-up, and starts polling.
+   * Loads active closer contracts and starts polling.
    *
    * Startup flow:
    * 1. Load closer contracts from SharedContract registry
-   * 2. Run finalized block catch-up (cachedBlock → current block)
-   * 3. Start polling batches for new events
-   * 4. Start block tracking heartbeat (re-persists what the pollers scanned)
+   * 2. Start polling batches — each fires its first sweep immediately and does
+   *    not block the next one (#88)
+   * 3. Start block tracking heartbeat (re-persists what the pollers scanned)
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -71,10 +65,7 @@ export class CloseOrderSubscriber {
       return;
     }
 
-    // 2. Run catch-up from cached block → current block
-    await this.runCatchUp();
-
-    // 3. Create and start polling batches
+    // 2. Create and start polling batches
     for (const [chainId, contracts] of contractsByChain) {
       const poller = new UniswapV3CloserPollingBatch(chainId, contracts);
       this.pollers.push(poller);
@@ -83,7 +74,7 @@ export class CloseOrderSubscriber {
 
     this.isRunning = true;
 
-    // 4. Start block tracking heartbeat
+    // 3. Start block tracking heartbeat
     this.startBlockTracking();
 
     const totalContracts = Array.from(contractsByChain.values()).reduce(
@@ -114,7 +105,6 @@ export class CloseOrderSubscriber {
     // Stop all pollers
     await Promise.all(this.pollers.map((poller) => poller.stop()));
     this.pollers = [];
-    this.contractsByChain.clear();
     this.isRunning = false;
 
     priceLog.workerLifecycle(log, 'CloseOrderSubscriber', 'stopped');
@@ -202,12 +192,6 @@ export class CloseOrderSubscriber {
             chainId,
           });
 
-          // Track for catch-up
-          if (!this.contractsByChain.has(chainId)) {
-            this.contractsByChain.set(chainId, []);
-          }
-          this.contractsByChain.get(chainId)!.push(config.address);
-
           log.info({
             chainId,
             contractName,
@@ -241,40 +225,6 @@ export class CloseOrderSubscriber {
   }
 
   // ===========================================================================
-  // Catch-Up
-  // ===========================================================================
-
-  /**
-   * Run catch-up from cached block → current finalized block.
-   * Processes historical events before starting live polling.
-   */
-  private async runCatchUp(): Promise<void> {
-    const config = getCatchUpConfig();
-
-    if (!config.enabled) {
-      log.info({ msg: 'Close order catch-up disabled by configuration' });
-      return;
-    }
-
-    if (this.contractsByChain.size === 0) {
-      log.info({ msg: 'No contracts to catch up' });
-      return;
-    }
-
-    log.info({ msg: 'Running close order catch-up before starting polling' });
-    const results = await executeCloseOrderCatchUpFinalizedForChains(this.contractsByChain);
-
-    const totalEvents = results.reduce((sum, r) => sum + r.eventsPublished, 0);
-    const failedChains = results.filter((r) => r.error).length;
-    log.info({
-      chainsProcessed: results.length,
-      failedChains,
-      totalEvents,
-      msg: 'Close order catch-up completed',
-    });
-  }
-
-  // ===========================================================================
   // Block Tracking
   // ===========================================================================
 
@@ -282,10 +232,10 @@ export class CloseOrderSubscriber {
    * Start the block tracking heartbeat timer.
    */
   private startBlockTracking(): void {
-    const config = getCatchUpConfig();
+    const config = getCloseOrderCursorConfig();
 
     if (!config.enabled) {
-      log.info({ msg: 'Close order block tracking disabled (catch-up disabled)' });
+      log.info({ msg: 'Close order cursor heartbeat disabled by configuration' });
       return;
     }
 

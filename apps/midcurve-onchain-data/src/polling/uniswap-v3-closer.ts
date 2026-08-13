@@ -21,15 +21,32 @@ import {
   fetchHistoricalCloseOrderEvents,
   getCloseOrderLastProcessedBlock,
   setCloseOrderLastProcessedBlock,
-} from '../catchup/close-order-catchup';
+} from './close-order-scan';
 
 const log = onchainDataLogger.child({ component: 'UniswapV3CloserPoller' });
 
+/**
+ * The `error` field of a log line, never empty.
+ *
+ * amqplib's connection errors arrive with an empty `message`. Observed in the
+ * #88 publish-failure run: the line reporting a permanently lost publish carried
+ * `"error": ""` — blank in the one field an operator greps, on the one line that
+ * matters. The name is always there, and amqplib carries a `code` on some of
+ * them, so fall back to those rather than to nothing.
+ *
+ * Not an error taxonomy. Just never write an empty string where the diagnosis
+ * goes.
+ */
+function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  if (error.message) return error.message;
+
+  const code = (error as { code?: unknown }).code;
+  return code === undefined ? error.name : `${error.name} (code ${String(code)})`;
+}
+
 /** Polling interval for eth_getLogs reads (default: 1 hour, fallback safety net) */
 const POLL_INTERVAL_MS = parseInt(process.env.CLOSER_POLL_INTERVAL_MS || '3600000', 10);
-
-/** Maximum blocks per eth_getLogs request */
-const BATCH_SIZE_BLOCKS = parseInt(process.env.CLOSER_POLL_BATCH_SIZE || '10000', 10);
 
 /**
  * Contract info for polling.
@@ -53,20 +70,28 @@ export class UniswapV3CloserPollingBatch {
   /**
    * Whether a poll cycle has actually scanned a range on this batch.
    *
-   * `lastProcessedBlock` is seeded from the chain head when the cache holds no
-   * cursor (see `start()`), and at that moment nothing has been scanned. The
-   * flag separates "this is where we start looking" from "this is what we have
-   * looked at", so the heartbeat can only ever persist the latter.
+   * `lastProcessedBlock` starts as the persisted cursor, or null when there is
+   * none — and null means "scan from block 0", not "we are up to date". Nothing
+   * has been scanned at that point either way. The flag separates "this is where
+   * we start looking" from "this is what we have looked at", so the heartbeat
+   * can only ever persist the latter.
    *
-   * Edge worth knowing: with no cached cursor AND catch-up disabled, this stays
-   * false for a full poll interval, so nothing is persisted and a restart in
-   * that window re-seeds from the head — the same skip, bounded to one interval
-   * instead of unbounded. In normal operation catch-up writes the cursor before
-   * any poller starts, so the window never opens. The cold-start cursor does
-   * therefore still depend on catch-up having run; what no longer depends on it
-   * is every subsequent restart.
+   * The cold-start window this used to describe — nothing persisted for a full
+   * poll interval on an empty cache, because catch-up wrote the first cursor —
+   * closed with the immediate first sweep in `start()` (#88).
    */
   private hasCompletedScan = false;
+
+  /**
+   * Whether a sweep is in flight.
+   *
+   * A cold-cursor sweep can run for up to the scan timeout (120s) while
+   * CLOSER_POLL_INTERVAL_MS is 60s in the dev environment, so the interval can
+   * fire on top of a sweep that has not finished. Two concurrent sweeps would
+   * race on the cursor write and the older one could land last, moving the
+   * cursor backwards over blocks that were already published.
+   */
+  private isPolling = false;
 
   constructor(chainId: number, contracts: CloserContractInfo[]) {
     this.chainId = chainId;
@@ -75,46 +100,65 @@ export class UniswapV3CloserPollingBatch {
 
   /**
    * Start polling for events.
-   * Loads last processed block from cache and begins periodic polling.
+   *
+   * Loads the cursor, arms the interval, and fires the first sweep immediately —
+   * without awaiting it. Both halves of that carry weight:
+   *
+   * - Without the immediate sweep, nothing is scanned for a full
+   *   CLOSER_POLL_INTERVAL_MS (one hour by default) after startup. Deleting the
+   *   catch-up without this would have traded one startup defect for another,
+   *   invisibly, since an unscanned range logs identically to an empty one.
+   * - Without "not awaited", CloseOrderSubscriber's sequential start loop would
+   *   make each chain's poller wait for the previous chain's full-history sweep,
+   *   which is the backfill-blocks-polling defect this replaced. See #88.
+   *
+   * An empty cache leaves the cursor null, which `poll()` reads as block 0. The
+   * historical range is scanned by the poller now; nothing else scans it.
    */
   async start(): Promise<void> {
     if (this.isRunning) return;
 
-    // Load last processed block from cache
+    // No cursor means no scan has happened for this chain, so the sweep starts
+    // at genesis. It is one request either way (#88).
     this.lastProcessedBlock = await getCloseOrderLastProcessedBlock(this.chainId);
-
-    if (this.lastProcessedBlock === null) {
-      // First run: start from current block (catch-up handles historical)
-      const evmConfig = EvmConfig.getInstance();
-      const client = evmConfig.getPublicClient(this.chainId);
-      this.lastProcessedBlock = await client.getBlockNumber();
-
-      log.info({
-        chainId: this.chainId,
-        startBlock: this.lastProcessedBlock.toString(),
-        msg: 'No cached block, starting from current block',
-      });
-    }
 
     this.isRunning = true;
 
     this.pollTimer = setInterval(() => {
-      this.poll().catch((err) => {
-        log.error({
-          chainId: this.chainId,
-          error: err instanceof Error ? err.message : String(err),
-          msg: 'Error polling close order events',
-        });
-      });
+      void this.runPoll();
     }, POLL_INTERVAL_MS);
 
     log.info({
       chainId: this.chainId,
       intervalMs: POLL_INTERVAL_MS,
       contractCount: this.contractAddresses.length,
-      lastBlock: this.lastProcessedBlock.toString(),
+      lastBlock: this.lastProcessedBlock?.toString() ?? 'none, scanning from block 0',
       msg: 'Started close order polling',
     });
+
+    // Deliberately not awaited — see the note above.
+    void this.runPoll();
+  }
+
+  /**
+   * Worker entry point for one poll cycle: everything below throws, and this is
+   * where it becomes a log line.
+   *
+   * A failed sweep or a failed publish leaves the cursor untouched, so the same
+   * range is retried on the next tick. That is the point — the previous
+   * behaviour reported "0 events found" and moved on.
+   */
+  private async runPoll(): Promise<void> {
+    try {
+      await this.poll();
+    } catch (err) {
+      log.error({
+        chainId: this.chainId,
+        error: describeError(err),
+        cause: err instanceof Error && err.cause !== undefined ? describeError(err.cause) : undefined,
+        msg: 'Close order poll failed, cursor left unchanged',
+      });
+    }
   }
 
   /**
@@ -164,16 +208,42 @@ export class UniswapV3CloserPollingBatch {
   }
 
   /**
-   * Single poll cycle: fetch events from lastBlock+1 → currentBlock.
+   * Single poll cycle: fetch events from lastBlock+1 → currentBlock, or from
+   * block 0 when there is no cursor yet.
    */
   private async poll(): Promise<void> {
-    if (this.lastProcessedBlock === null) return;
+    if (this.isPolling) {
+      log.warn({
+        chainId: this.chainId,
+        msg: 'Close order sweep still in flight, skipping this tick',
+      });
+      return;
+    }
 
+    this.isPolling = true;
+    try {
+      await this.sweep();
+    } finally {
+      this.isPolling = false;
+    }
+  }
+
+  private async sweep(): Promise<void> {
+    // The head read deliberately uses EvmConfig's shared client — viem's
+    // defaults, 10s and 3 retries — not the 120s client the sweep below builds
+    // for itself. It is one cheap call, and the long budget exists for a
+    // full-history eth_getLogs, not for this.
+    //
+    // The property that follows from it, worth stating rather than discovering:
+    // a hung provider surfaces here at 10s, not at 120s from the sweep. An
+    // unauthenticated key does the same — the #88 verification run failed on
+    // this line with a 401 on eth_blockNumber and never reached eth_getLogs, so
+    // the scan's own failure message never ran.
     const evmConfig = EvmConfig.getInstance();
     const client = evmConfig.getPublicClient(this.chainId);
     const currentBlock = await client.getBlockNumber();
 
-    const fromBlock = this.lastProcessedBlock + 1n;
+    const fromBlock = this.lastProcessedBlock === null ? 0n : this.lastProcessedBlock + 1n;
     if (fromBlock > currentBlock) return;
 
     const events = await fetchHistoricalCloseOrderEvents({
@@ -181,15 +251,25 @@ export class UniswapV3CloserPollingBatch {
       contractAddresses: this.contractAddresses,
       fromBlock,
       toBlock: currentBlock,
-      batchSize: BATCH_SIZE_BLOCKS,
     });
 
     if (events.length > 0) {
       const mq = getRabbitMQConnection();
       let publishedCount = 0;
 
-      // Per-event isolation: one unusable event must not take the rest of the
-      // batch down with it. Matches the catch-up publishers.
+      // A publish failure aborts the cycle, leaving the cursor where it was.
+      //
+      // This reverses the per-event isolation added in 34de883b. That change
+      // stopped one bad event killing the batch, and the rationale assumed
+      // event-specific publish failures exist. They do not:
+      // publishCloseOrderEvent throws only via getChannel() or a closed channel,
+      // both connection-wide, so the blast radius it isolated never had more
+      // than one member. What the isolation did buy was Defect 2b of #88 — an
+      // event decoded successfully, failed to publish, and was then lost
+      // permanently because the cursor advanced past it anyway.
+      //
+      // Replaying the whole range on the next cycle is the cost, and #79 made
+      // that idempotent for the automation log.
       for (const { event } of events) {
         if (!event) continue;
         try {
@@ -198,16 +278,23 @@ export class UniswapV3CloserPollingBatch {
           await mq.publishCloseOrderEvent(routingKey, content);
           publishedCount++;
         } catch (error) {
-          log.warn({
+          // Logged here rather than at the boundary because only this frame
+          // knows which event failed and how far the batch got. Then re-thrown:
+          // the cursor write below must not run.
+          log.error({
             chainId: this.chainId,
             eventType: event.type,
             nftId: event.nftId,
             vaultAddress: event.vaultAddress,
             ownerAddress: event.ownerAddress,
             txHash: event.transactionHash,
-            error: error instanceof Error ? error.message : String(error),
-            msg: 'Failed to publish close order event from poll, skipping',
+            fromBlock: fromBlock.toString(),
+            toBlock: currentBlock.toString(),
+            publishedBeforeFailure: publishedCount,
+            error: describeError(error),
+            msg: 'Failed to publish close order event, aborting poll with the cursor unchanged',
           });
+          throw error;
         }
       }
 
@@ -220,9 +307,10 @@ export class UniswapV3CloserPollingBatch {
       });
     }
 
-    // Update tracking. The range fromBlock→currentBlock has now been through
-    // eth_getLogs, so it is honest to both advance the watermark and let the
-    // heartbeat persist it.
+    // Update tracking. Reaching this line means the range fromBlock→currentBlock
+    // went through eth_getLogs AND every event it produced was published, so it
+    // is honest to both advance the watermark and let the heartbeat persist it.
+    // Either failure throws before here and the cursor stands.
     this.lastProcessedBlock = currentBlock;
     this.hasCompletedScan = true;
     await setCloseOrderLastProcessedBlock(this.chainId, currentBlock);

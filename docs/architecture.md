@@ -513,8 +513,8 @@ midcurve-onchain-data/
 ├── src/
 │   ├── index.ts              # Entry point
 │   ├── workers/              # All 6 subscribers + WorkerManager
-│   ├── polling/              # Per-chain polling batches (pools, closers)
-│   ├── catchup/              # Finalized-block close-order catch-up
+│   ├── polling/              # Per-chain polling batches (pools, closers) and
+│   │                         # the close-order scan + cursor they share
 │   ├── mq/                   # RabbitMQ connection, topology, message types
 │   ├── events/               # Domain event handlers
 │   └── lib/                  # Logger, config, services

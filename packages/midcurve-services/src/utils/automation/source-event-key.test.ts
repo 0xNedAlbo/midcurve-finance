@@ -1,11 +1,12 @@
 /**
  * createSourceEventKey / sourceEventKeyForCloseOrderEvent — unit tests
  *
- * The key is the contract between three producers of close order events — the
- * poller, the catch-up scanner and publishCloseOrderEventsFromReceipt. If they
- * ever disagree on a single character, a replayed event stops being recognised as
- * a replay and the duplicate row #79 removed comes back. So the shape is pinned
- * here, along with the two cases that must NOT produce a key.
+ * The key is the contract between the two producers of close order events — the
+ * fallback poller and publishCloseOrderEventsFromReceipt (it was three until #88
+ * deleted the startup catch-up). If they ever disagree on a single character, a
+ * replayed event stops being recognised as a replay and the duplicate row #79
+ * removed comes back. So the shape is pinned here, along with the two cases that
+ * must NOT produce a key.
  */
 
 import { describe, it, expect } from 'vitest';
