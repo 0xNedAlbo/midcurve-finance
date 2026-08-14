@@ -502,6 +502,19 @@ export const EXCHANGE_CLOSE_ORDER_EVENTS = 'close-order-events';
  */
 export const EXCHANGE_CLOSE_ORDER_EVENTS_DLX = 'close-order-events-dlx';
 
+/**
+ * Dead-letter queue bound to that exchange.
+ *
+ * Exported rather than kept private to the business-logic rule that declares it,
+ * because automation's health endpoint reports its depth and would otherwise
+ * hold a copy of the string. A copy rots the day this name changes, and it rots
+ * into "queue absent" — a reading that looks legitimate and means "wrong name".
+ * That is the failure #82 exists to remove, so it does not get rebuilt inside
+ * the fix.
+ */
+export const QUEUE_CLOSE_ORDER_EVENTS_DLQ =
+  'business-logic.uniswapv3-process-close-order-events.dlq';
+
 /** Retention for dead-lettered close order events (7 days) */
 export const CLOSE_ORDER_DLQ_MESSAGE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 

@@ -221,7 +221,7 @@ PriceMonitor (polls every 10s)
   ↓ publishes OrderTriggerMessage
 automation.triggers exchange
   ↓ routes to
-orders.pending queue
+orders.pending.v2 queue
   ↓ consumed by
 OrderExecutor (3 consumers)
   ↓ signs via SignerClient

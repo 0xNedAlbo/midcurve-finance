@@ -73,6 +73,7 @@ import {
   createDomainEvent,
   EXCHANGE_CLOSE_ORDER_EVENTS,
   EXCHANGE_CLOSE_ORDER_EVENTS_DLX,
+  QUEUE_CLOSE_ORDER_EVENTS_DLQ,
   CLOSE_ORDER_DLQ_MESSAGE_TTL_MS,
 } from '@midcurve/services';
 import type {
@@ -161,8 +162,13 @@ import type {
  */
 const QUEUE_NAME = 'business-logic.uniswapv3-process-close-order-events.v2';
 
-/** Dead-letter queue for messages this rule cannot interpret */
-const DLQ_NAME = 'business-logic.uniswapv3-process-close-order-events.dlq';
+/**
+ * Dead-letter queue for messages this rule cannot interpret.
+ *
+ * The name lives in @midcurve/services because automation's health endpoint
+ * reports this queue's depth. This rule declares it; two services name it.
+ */
+const DLQ_NAME = QUEUE_CLOSE_ORDER_EVENTS_DLQ;
 
 /** Routing pattern for UniswapV3 NFT close order events (4 segments: closer.chainId.nftId.triggerMode) */
 const UNISWAPV3_ROUTING_PATTERN = 'closer.*.*.*';

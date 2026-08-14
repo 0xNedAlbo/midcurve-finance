@@ -51,6 +51,33 @@ class RabbitMQConnectionManager {
   }
 
   /**
+   * Open a channel that carries no consumers, for callers that may kill it.
+   *
+   * getChannel() hands out the one shared channel that every executor and
+   * monitor consumer runs on. Anything that can provoke a server-side channel
+   * exception — a passive declare against a queue that may not exist is the
+   * case in hand — must not touch it: RabbitMQ closes the channel on the way
+   * out and takes those consumers with it.
+   *
+   * The caller owns the returned channel and must close it. It gets none of the
+   * handlers connect() attaches to the shared channel, so its death never nulls
+   * this.channel or triggers a reconnect. It has no error listener yet either,
+   * which matters: an 'error' event with no listener is an uncaught exception.
+   * probeQueueDepths() attaches one before use.
+   */
+  async createProbeChannel(): Promise<Channel> {
+    // Establishes the connection if there isn't one, without handing out the
+    // shared channel it also creates.
+    await this.getChannel();
+
+    if (!this.connection) {
+      throw new Error('RabbitMQ connection unavailable');
+    }
+
+    return this.connection.createChannel();
+  }
+
+  /**
    * Check if connected
    */
   isConnected(): boolean {
