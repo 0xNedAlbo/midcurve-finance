@@ -92,6 +92,11 @@ function openDevLogFile(): pino.DestinationStream {
  * #94: five months in which no debug record reached either destination while
  * the logger reported debug as enabled.
  *
+ * These levels are fixed at construction, so a child logger cannot raise
+ * verbosity past them: child({ level: 'trace' }) would report trace as enabled
+ * and still write nothing — #94 one layer up, and untested because the call
+ * site does not exist. createServiceLogger passes bindings only.
+ *
  * The cast is deliberate. LOG_LEVEL is a plain string and StreamEntry.level is
  * typed pino.Level, which excludes 'silent'; multistream resolves 'silent' at
  * runtime through its own streamLevels map, where it is Infinity. An unknown
