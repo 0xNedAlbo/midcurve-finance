@@ -32,9 +32,12 @@ const LOG_LEVEL =
 
 /**
  * Base logger configuration
+ *
+ * The level is deliberately absent here: createLogger() owns it, so that the
+ * logger's level and the per-destination levels are set from one value in one
+ * place. See buildDevStreams() for why that matters.
  */
 const loggerConfig: pino.LoggerOptions = {
-  level: LOG_LEVEL,
   timestamp: pino.stdTimeFunctions.isoTime,
   formatters: {
     level(label) {
@@ -63,16 +66,11 @@ function findRepoRoot(): string {
 }
 
 /**
- * Build the pino destination.
+ * Open logs/dev.log for appending, creating the logs directory if needed.
  *
- * In development: multistream to stdout + logs/dev.log (append mode).
- * In production/test: stdout only.
+ * Only called on the development branch of createLogger().
  */
-function buildDestination(): pino.DestinationStream {
-  if (NODE_ENV !== 'development') {
-    return process.stdout;
-  }
-
+function openDevLogFile(): pino.DestinationStream {
   const repoRoot = findRepoRoot();
   const logsDir = path.join(repoRoot, 'logs');
   if (!fs.existsSync(logsDir)) {
@@ -80,12 +78,82 @@ function buildDestination(): pino.DestinationStream {
   }
 
   const logFilePath = path.join(logsDir, 'dev.log');
-  const fileStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+  return fs.createWriteStream(logFilePath, { flags: 'a' });
+}
 
-  return pino.multistream([
-    { stream: process.stdout },
-    { stream: fileStream },
-  ]);
+/**
+ * Build the development stream entries: stdout + logs/dev.log.
+ *
+ * Both entries carry an explicit level. pino filters twice — once at the
+ * logger, once per stream — and a multistream entry that supplies neither
+ * `level` nor `levelVal` is assigned info (30) by lib/multistream.js add(),
+ * whatever the logger's own level says. write() then stops at the first stream
+ * above the record's level, so a debug record (20) reaches nothing. That is
+ * #94: five months in which no debug record reached either destination while
+ * the logger reported debug as enabled.
+ *
+ * These levels are fixed at construction, so a child logger cannot raise
+ * verbosity past them: child({ level: 'trace' }) would report trace as enabled
+ * and still write nothing — #94 one layer up, and untested because the call
+ * site does not exist. createServiceLogger passes bindings only.
+ *
+ * The cast is deliberate. LOG_LEVEL is a plain string and StreamEntry.level is
+ * typed pino.Level, which excludes 'silent'; multistream resolves 'silent' at
+ * runtime through its own streamLevels map, where it is Infinity. An unknown
+ * level string resolves to undefined here and silently disables the stream —
+ * but pino() rejects it a moment later, so the process fails loudly rather
+ * than starting deaf. Note the order: the destination is built, silently dead,
+ * before pino() throws, because it is an argument to it.
+ */
+function buildDevStreams(
+  logLevel: string,
+  stdout: pino.DestinationStream,
+  file: pino.DestinationStream
+): pino.StreamEntry[] {
+  const level = logLevel as pino.Level;
+
+  return [
+    { level, stream: stdout },
+    { level, stream: file },
+  ];
+}
+
+/**
+ * Options for createLogger().
+ *
+ * Every input the logger depends on is passed in rather than read from the
+ * environment, so the wiring can be exercised by a test. See #94: the previous
+ * shape could only be tested by rebuilding a multistream in the test, which
+ * exercises pino rather than this module.
+ */
+export interface CreateLoggerOptions {
+  nodeEnv: string;
+  logLevel: string;
+  stdout: pino.DestinationStream;
+  openLogFile: () => pino.DestinationStream;
+}
+
+/**
+ * Build a logger.
+ *
+ * In development: multistream to stdout + logs/dev.log (append mode).
+ * In production/test: stdout only.
+ *
+ * Exported for the test in logger.test.ts, and deliberately not re-exported
+ * from ./index.ts or the package barrel — there is one logger per process and
+ * this is not a second way to get one.
+ */
+export function createLogger(opts: CreateLoggerOptions): pino.Logger {
+  const config: pino.LoggerOptions = { ...loggerConfig, level: opts.logLevel };
+
+  if (opts.nodeEnv !== 'development') {
+    return pino(config, opts.stdout);
+  }
+
+  return pino(
+    config,
+    pino.multistream(buildDevStreams(opts.logLevel, opts.stdout, opts.openLogFile()))
+  );
 }
 
 /**
@@ -95,7 +163,12 @@ function buildDestination(): pino.DestinationStream {
  * Service-specific loggers should be created via createServiceLogger()
  * in logger-factory.ts
  */
-export const logger = pino(loggerConfig, buildDestination());
+export const logger = createLogger({
+  nodeEnv: NODE_ENV,
+  logLevel: LOG_LEVEL,
+  stdout: process.stdout,
+  openLogFile: openDevLogFile,
+});
 
 /**
  * Logger type export

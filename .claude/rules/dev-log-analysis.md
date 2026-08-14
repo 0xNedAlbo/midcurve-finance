@@ -17,6 +17,37 @@ and propagates automatically to every child logger created via `createServiceLog
 
 In production and test, logs go to stdout only — no file I/O.
 
+## Debug records, and a file that predates `8b6ae3c1`
+
+**Before `8b6ae3c1`, this file contained no debug record at all** — not a
+filtered subset, none, regardless of `LOG_LEVEL`. Both multistream entries were
+built without a `level`, and `pino` assigns `info` to an entry that omits one,
+so every debug record was discarded after the logger had already decided to
+emit it. Five months of them, from `98a8ee13` (2026-03-17). See #94.
+
+The consequence for anyone reading a `dev.log` carried over from before that
+commit: **"no debug lines found" in it is not evidence that nothing happened.**
+The 228 `.debug(` call sites and the 490 `LogPatterns` calls that route to
+debug — `methodEntry`, `methodExit`, `cacheHit`, `cacheMiss`, `dbOperation`,
+`externalApiCall` — all fired and all went nowhere. Truncate and re-run before
+concluding anything from their absence.
+
+Since that commit, debug records reach both stdout and this file when
+`LOG_LEVEL=debug`. The root `.env.example` ships `info`, so debug is opt-in per
+run and applies to every service at once — there is no per-service level.
+
+There is deliberately **no rotation, no size cap and no separate file level**.
+A knob that let the file level differ from the logger level is exactly the
+asymmetry that hid #94 for five months. `logs/dev.log` is local and gitignored;
+the remedy for size is to truncate it before a run you intend to read:
+
+```bash
+: > logs/dev.log      # then start the services, then analyse
+```
+
+Doing that first also makes line counts meaningful, which they are not against
+a file that has been accumulating since March.
+
 ## Filtering by level — read this before writing a `jq` filter
 
 **`select(.level >= 40)` does not work here, and fails silently by matching

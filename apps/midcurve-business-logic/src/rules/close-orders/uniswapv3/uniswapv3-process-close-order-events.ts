@@ -712,8 +712,11 @@ export class UniswapV3ProcessCloseOrderEventsRule extends BusinessRule {
 
       if (existingOrder) {
         if (existingOrder.automationState === 'monitoring') {
-          // Already monitoring — idempotent skip
-          this.logger.debug(
+          // Already monitoring — idempotent skip. At info rather than debug:
+          // this is the only outcome of handleRegistered not otherwise visible
+          // without turning debug on globally, and close-order events are
+          // low-frequency. See #94.
+          this.logger.info(
             { orderId: existingOrder.id },
             'Order already monitoring, skipping registered event'
           );
