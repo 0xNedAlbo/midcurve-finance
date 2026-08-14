@@ -312,18 +312,14 @@ export async function setupConsumerQueue(
 // ============================================================
 // Verification
 // ============================================================
-
-/**
- * Verify domain events topology exists.
- * Returns true if all core exchanges and queues exist.
- */
-export async function verifyDomainEventsTopology(channel: Channel): Promise<boolean> {
-  try {
-    await channel.checkExchange(DOMAIN_EVENTS_EXCHANGE);
-    await channel.checkExchange(DOMAIN_EVENTS_DLX);
-    await channel.checkQueue(DOMAIN_QUEUES.DLQ);
-    return true;
-  } catch {
-    return false;
-  }
-}
+//
+// There was a verifyDomainEventsTopology() here. It was exported, called from
+// nowhere, and its one behaviour was a hazard: passive declares close the
+// channel they are handed when the thing being checked is absent, so the first
+// run against a fresh broker would report "topology missing" while having
+// destroyed the caller's channel — taking its consumers with it. The `catch`
+// could not tell that apart from a broker being down.
+//
+// Deleted rather than fixed in #82. If something needs to know whether a queue
+// exists, probeQueueDepths() in ./queue-depth.ts asks that question on a channel
+// of its own.

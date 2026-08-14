@@ -143,8 +143,15 @@ export {
   // Functions - Topology setup
   setupDomainEventsTopology,
   setupConsumerQueue,
-  verifyDomainEventsTopology,
 } from './topology.js';
+
+// ============================================================
+// Queue Depth Probe
+// ============================================================
+
+export { probeQueueDepths } from './queue-depth.js';
+
+export type { QueueDepth, ProbeChannelFactory } from './queue-depth.js';
 
 // ============================================================
 // Publisher
@@ -202,6 +209,7 @@ export {
   // Constants
   EXCHANGE_CLOSE_ORDER_EVENTS,
   EXCHANGE_CLOSE_ORDER_EVENTS_DLX,
+  QUEUE_CLOSE_ORDER_EVENTS_DLQ,
   CLOSE_ORDER_DLQ_MESSAGE_TTL_MS,
   CLOSER_LIFECYCLE_EVENT_ABIS,
   VAULT_CLOSER_LIFECYCLE_EVENT_ABIS,
