@@ -149,9 +149,9 @@ export {
 // Queue Depth Probe
 // ============================================================
 
-export { probeQueueDepths } from './queue-depth.js';
+export { probeQueueDepths, QueueProbeTimeoutError } from './queue-depth.js';
 
-export type { QueueDepth, ProbeChannelFactory } from './queue-depth.js';
+export type { QueueDepth, ProbeChannelFactory, ProbeOptions } from './queue-depth.js';
 
 // ============================================================
 // Publisher

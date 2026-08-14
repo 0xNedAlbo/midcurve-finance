@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { describe, it, expect, vi } from 'vitest';
 import type { Channel } from 'amqplib';
-import { probeQueueDepths, type ProbeChannelFactory } from './queue-depth.js';
+import {
+  probeQueueDepths,
+  QueueProbeTimeoutError,
+  type ProbeChannelFactory,
+} from './queue-depth.js';
 
 // =============================================================================
 // Fakes
@@ -221,5 +225,108 @@ describe('probeQueueDepths', () => {
 
     expect(depths).toEqual([]);
     expect(channels).toHaveLength(0);
+  });
+
+  // A broker that is connected but no longer answering leaves checkQueue
+  // unsettled until the AMQP heartbeat gives up. Unbounded, that is a hung
+  // endpoint rather than a slow one — which to a liveness probe is a dead
+  // service.
+  describe('when the broker stops answering', () => {
+    /** checkQueue and close both never settle, as a stalled broker behaves. */
+    function stalledFactory(): { factory: ProbeChannelFactory; closeCalls: () => number } {
+      let closeCalls = 0;
+      const factory: ProbeChannelFactory = async () => {
+        const channel = new EventEmitter() as unknown as Channel;
+        channel.checkQueue = vi.fn().mockReturnValue(new Promise(() => undefined));
+        channel.close = vi.fn().mockImplementation(() => {
+          closeCalls++;
+          return new Promise(() => undefined);
+        });
+        return channel;
+      };
+      return { factory, closeCalls: () => closeCalls };
+    }
+
+    it('gives up on the budget instead of waiting forever', async () => {
+      const { factory } = stalledFactory();
+
+      await expect(
+        probeQueueDepths(factory, ['stalled.dlq'], { timeoutMs: 50 })
+      ).rejects.toThrow(QueueProbeTimeoutError);
+    });
+
+    it('names the queue and the budget in the error', async () => {
+      const { factory } = stalledFactory();
+
+      await expect(
+        probeQueueDepths(factory, ['stalled.dlq'], { timeoutMs: 50 })
+      ).rejects.toThrow("Timed out after 50ms probing queue 'stalled.dlq'");
+    });
+
+    // The close would hang for the same reason checkQueue did. Awaiting it in
+    // the finally block would re-introduce exactly the hang the timeout escaped.
+    it('does not wait on the close of a channel it gave up on', async () => {
+      const { factory, closeCalls } = stalledFactory();
+
+      await expect(
+        probeQueueDepths(factory, ['stalled.dlq'], { timeoutMs: 50 })
+      ).rejects.toThrow(QueueProbeTimeoutError);
+
+      // Attempted — the channel is handed back best-effort — but not awaited,
+      // which is why this assertion is reached at all.
+      expect(closeCalls()).toBe(1);
+    });
+
+    // Opening a channel is itself a round trip, so a stalled broker hangs here
+    // before there is any declare to time out. Racing only the declare would
+    // leave the hang reachable by the shorter path.
+    it('gives up when the channel itself never opens', async () => {
+      const factory: ProbeChannelFactory = () => new Promise(() => undefined);
+
+      await expect(
+        probeQueueDepths(factory, ['stalled.dlq'], { timeoutMs: 50 })
+      ).rejects.toThrow(QueueProbeTimeoutError);
+    });
+
+    it('hands back a channel that opens after the budget expired', async () => {
+      const close = vi.fn().mockResolvedValue(undefined);
+      const factory: ProbeChannelFactory = () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            const channel = new EventEmitter() as unknown as Channel;
+            channel.checkQueue = vi.fn().mockResolvedValue({ queue: 'x', messageCount: 0 });
+            channel.close = close;
+            resolve(channel);
+          }, 80);
+        });
+
+      await expect(
+        probeQueueDepths(factory, ['slow.dlq'], { timeoutMs: 30 })
+      ).rejects.toThrow(QueueProbeTimeoutError);
+
+      // The late channel is closed rather than leaked.
+      await new Promise((r) => setTimeout(r, 120));
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops at the first stalled queue rather than paying the budget per queue', async () => {
+      const { factory } = stalledFactory();
+      const started = Date.now();
+
+      await expect(
+        probeQueueDepths(factory, ['a.dlq', 'b.dlq', 'c.dlq'], { timeoutMs: 50 })
+      ).rejects.toThrow(QueueProbeTimeoutError);
+
+      expect(Date.now() - started).toBeLessThan(150);
+    });
+  });
+
+  it('does not delay a probe that answers well inside the budget', async () => {
+    const { factory } = channelFactory({ 'a.dlq': 1 });
+    const started = Date.now();
+
+    await probeQueueDepths(factory, ['a.dlq'], { timeoutMs: 5000 });
+
+    expect(Date.now() - started).toBeLessThan(500);
   });
 });
