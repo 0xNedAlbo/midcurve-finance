@@ -10,6 +10,9 @@ import type { QueueDepth } from '@midcurve/services';
 import { getWorkerManager } from '../../../workers';
 import { getRabbitMQConnection } from '../../../mq/connection-manager';
 import { probeDeadLetterQueues } from '../../../mq/queue-depth';
+import { automationLogger } from '../../../lib/logger';
+
+const log = automationLogger.child({ component: 'HealthRoute' });
 
 export interface HealthResponse {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -35,8 +38,9 @@ export interface HealthResponse {
      * Depth of each dead-letter queue. `messages: null` means the queue does
      * not exist — normal on a broker where a service has not started yet.
      *
-     * Empty when RabbitMQ is not connected: there is nothing to ask, and a
-     * health check does not open a connection to find out.
+     * Empty means no depths were obtained: RabbitMQ is not connected, the probe
+     * exceeded its budget, or it failed. One meaning, three causes — the field
+     * says what was learned, not why.
      */
     deadLetterQueues: QueueDepth[];
   };
@@ -56,7 +60,31 @@ export async function GET(): Promise<NextResponse<HealthResponse>> {
   const mq = getRabbitMQConnection();
   const mqConnected = mq.isConnected();
 
-  const deadLetterQueues = mqConnected ? await probeDeadLetterQueues() : [];
+  // The probe is bounded and its failure is contained here. A health endpoint
+  // that hangs, or that 500s without a body, is a worse signal than one that
+  // reports fewer numbers: to a liveness probe both read as a dead service, and
+  // the restart they trigger cannot fix a broker that is slow or gone. That is
+  // decision 4's reasoning applied to the probe rather than to its subject.
+  //
+  // Before this endpoint reported depths at all, the same conditions returned
+  // 503 with `rabbitmq: error` in the body. It still does — `status` stays
+  // governed by mqConnected, and no third state enters the contract.
+  //
+  // This is the message-handler boundary under .claude/rules/error-handling.md,
+  // and the catch is not a swallow: it logs, and the empty array is not passed
+  // off as "all three queues are empty".
+  let deadLetterQueues: QueueDepth[] = [];
+
+  if (mqConnected) {
+    try {
+      deadLetterQueues = await probeDeadLetterQueues();
+    } catch (err) {
+      log.warn({
+        error: err instanceof Error ? err.message : String(err),
+        msg: 'Dead-letter depth probe failed; reporting no depths rather than failing the endpoint',
+      });
+    }
+  }
 
   // Determine overall health.
   //
